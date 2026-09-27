@@ -33,19 +33,30 @@ export default function Comercios() {
     setTipo(c.tipo);
   };
 
-  const eliminar = (c: Comercio) =>
-    Alert.alert('Eliminar comercio', `¿Eliminar "${c.nombre}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          const ok = await repo.eliminarComercio(c.id);
-          if (!ok) Alert.alert('No se puede eliminar', 'Este comercio tiene precios registrados. Puedes cambiarle el nombre.');
-          await recargarComercios();
-        },
-      },
-    ]);
+  const eliminar = async (c: Comercio) => {
+    const precios = await repo.contarPreciosComercio(c.id);
+    const borrar = async () => {
+      await repo.eliminarComercio(c.id);
+      if (editando?.id === c.id) limpiar();
+      await recargarComercios();
+    };
+    if (!precios) {
+      return Alert.alert('Eliminar comercio', `¿Eliminar "${c.nombre}"?`, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: borrar },
+      ]);
+    }
+    Alert.alert(
+      'Eliminar comercio',
+      `"${c.nombre}" tiene ${precios} ${precios === 1 ? 'precio registrado' : 'precios registrados'}. ` +
+        'Si lo eliminas, esos precios también se borran del radar y del cálculo de ahorro ' +
+        '(tus compras pasadas siguen en el historial). Si solo cambió de nombre, mejor edítalo.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar igual', style: 'destructive', onPress: borrar },
+      ],
+    );
+  };
 
   return (
     <FlatList

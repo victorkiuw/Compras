@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatBs, formatCantidad, haceCuanto, parseMonto } from './format.ts';
+import { convertir, formatBs, formatCantidad, formatUsd, haceCuanto, parseMonto } from './format.ts';
 
 test('formatBs usa formato venezolano', () => {
   assert.equal(formatBs(1234.5), 'Bs. 1.234,50');
@@ -33,4 +33,11 @@ test('haceCuanto', () => {
   assert.equal(haceCuanto(new Date(2026, 8, 27, 8).toISOString(), ahora), 'hoy');
   assert.equal(haceCuanto(new Date(2026, 8, 26, 20).toISOString(), ahora), 'ayer');
   assert.equal(haceCuanto(new Date(2026, 8, 20).toISOString(), ahora), 'hace 7 días');
+});
+
+test('formatUsd y convertir con la tasa', () => {
+  assert.equal(formatUsd(5.4), '$5,40');
+  assert.deepEqual(convertir(5, 'USD', 36.5), { usd: 5, bs: 182.5 });
+  assert.deepEqual(convertir(182.5, 'BS', 36.5), { usd: 5, bs: 182.5 });
+  assert.deepEqual(convertir(5, 'USD', null), { usd: 5, bs: null });
 });

@@ -42,7 +42,7 @@ Docs: https://docs.expo.dev/eas/index.md
 
 ## Este proyecto
 
-- Idioma de la UI y del código de dominio: español. Moneda única: bolívares (`formatBs`, `parseMonto` en `src/lib/format.ts`).
+- Idioma de la UI y del código de dominio: español. Se paga en bolívares pero los precios se anotan normalmente en dólares con la tasa del día; guardar siempre Bs., $ y tasa (`convertir`, `formatBs`, `formatUsd` en `src/lib/format.ts`). Comparaciones de precios en $.
 - Offline-first: toda la persistencia va en SQLite (`src/db`). Cambios de esquema = nueva entrada al final de `MIGRACIONES`, nunca editar una ya publicada.
 - `npm test` corre las pruebas de `src/lib/*.test.ts` con el runner de Node (sin Jest); mantener esos módulos libres de imports de React Native.
 - En este entorno sin acceso a api.expo.dev usar `EXPO_OFFLINE=1 npx expo install <paquete>`.

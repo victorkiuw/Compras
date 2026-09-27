@@ -13,6 +13,23 @@ export function formatBs(n: number | null | undefined): string {
   return `Bs. ${formatNumero(n ?? 0, 2)}`;
 }
 
+export function formatUsd(n: number | null | undefined): string {
+  return `$${formatNumero(n ?? 0, 2)}`;
+}
+
+/** "36,50 Bs/$" */
+export function formatTasa(tasa: number | null | undefined): string {
+  return tasa ? `${formatNumero(tasa, 2)} Bs/$` : 'sin tasa';
+}
+
+export type Moneda = 'USD' | 'BS';
+
+/** Convierte un monto a ambas monedas usando la tasa (Bs por dólar). */
+export function convertir(monto: number, moneda: Moneda, tasa: number | null): { usd: number | null; bs: number | null } {
+  if (moneda === 'USD') return { usd: monto, bs: tasa ? monto * tasa : null };
+  return { usd: tasa ? monto / tasa : null, bs: monto };
+}
+
 /** Cantidad sin decimales innecesarios: 2 → "2", 1.5 → "1,5". */
 export function formatCantidad(n: number | null | undefined): string {
   if (n == null) return '';

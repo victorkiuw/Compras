@@ -38,6 +38,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="importar" options={{ title: 'Pegar lista', presentation: 'modal' }} />
           <Stack.Screen name="historial/[id]" options={{ title: 'Detalle de compra' }} />
+          <Stack.Screen name="producto/[id]" options={{ title: 'Producto' }} />
         </Stack>
       )}
     </SafeAreaProvider>
