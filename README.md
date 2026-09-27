@@ -67,14 +67,14 @@ npm run lint
 Todas las librerías usadas vienen incluidas en Expo Go, así que no hace falta una build
 nativa para probar.
 
-## Generar el APK (Fase 5)
+## Instalar en el teléfono (APK)
 
-```bash
-npx eas-cli@latest login
-npm run build:apk       # perfil "preview" de eas.json → .apk instalable
-```
+Cada cambio subido compila el APK en GitHub Actions (`.github/workflows/apk.yml`) y lo
+publica en **Releases** (`Compras-N.apk`). Desde el teléfono: abrir la Release más reciente,
+descargar el `.apk`, permitir "instalar apps de fuentes desconocidas" e instalar. Las versiones
+nuevas se instalan encima sin perder los datos.
 
-EAS compila en la nube y devuelve un enlace para descargar el `.apk` e instalarlo en el teléfono.
+También se puede compilar con EAS: `npx eas-cli@latest login` y `npm run build:apk`.
 
 ## Estado de las fases
 
@@ -83,4 +83,5 @@ EAS compila en la nube y devuelve un enlace para descargar el `.apk` e instalarl
 - [x] Fase 3 – Registro rápido de compra, pagos y sumatoria en Bs.
 - [x] Fase 4 – Historial automático de precios y radar por comercio.
 - [x] Extra – Facturas con varios productos, precios en $ con tasa de cambio y ahorro por comercio.
-- [ ] Fase 5 – Pruebas en dispositivo y compilación del APK (configurado; falta correr `eas build`).
+- [x] Fase 5 – Compilación del APK (GitHub Actions → Releases).
+- [ ] Pruebas en dispositivo real.
