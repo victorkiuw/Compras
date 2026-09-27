@@ -12,14 +12,19 @@ import { useCompraStore } from '../store/useCompraStore';
 export default function Importar() {
   const insets = useSafeAreaInsets();
   const { lista, items, importar } = useCompraStore();
-  const [texto, setTexto] = useState('');
+  const [texto, setTextoCrudo] = useState('');
   const [descartados, setDescartados] = useState<Set<number>>(new Set());
   const [guardando, setGuardando] = useState(false);
+
+  // Al cambiar el texto se reinician los descartes (los índices ya no corresponden).
+  const setTexto = (valor: string | ((actual: string) => string)) => {
+    setTextoCrudo(valor);
+    setDescartados(new Set());
+  };
 
   const parseados = useMemo(() => parseLista(texto), [texto]);
   const seleccionados = parseados.filter((_, i) => !descartados.has(i));
 
-  useEffect(() => setDescartados(new Set()), [texto]);
 
   // Si el portapapeles tiene texto al abrir, se pega automáticamente.
   useEffect(() => {

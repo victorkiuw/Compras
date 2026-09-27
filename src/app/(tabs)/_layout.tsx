@@ -1,9 +1,12 @@
 import { Tabs } from 'expo-router';
 import { colores, Icono, type NombreIcono } from '../../components/ui';
 
-const icono =
-  (nombre: NombreIcono) =>
-  ({ color }: { color: unknown }) => <Icono name={nombre} color={String(color)} size={24} />;
+function icono(nombre: NombreIcono) {
+  function TabIcono({ color }: { color: unknown }) {
+    return <Icono name={nombre} color={String(color)} size={24} />;
+  }
+  return TabIcono;
+}
 
 export default function TabsLayout() {
   return (

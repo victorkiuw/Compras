@@ -26,6 +26,8 @@
   "devDependencies": {
     "@types/node": "^22.20.4",
     "@types/react": "~19.2.2",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -35,7 +37,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test src/lib/*.test.ts",
-    "build:apk": "npx eas-cli@latest build -p android --profile preview"
+    "build:apk": "npx eas-cli@latest build -p android --profile preview",
+    "lint": "expo lint"
   },
   "private": true
 }

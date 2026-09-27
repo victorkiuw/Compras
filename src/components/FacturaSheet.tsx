@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   Image,
@@ -42,58 +42,72 @@ interface Linea {
  * que comparten comercio, método de pago, tasa de cambio y foto del ticket.
  */
 export function FacturaSheet({ apertura, onCerrar }: { apertura: AperturaFactura | null; onCerrar: () => void }) {
+  // Se monta de nuevo en cada apertura, así el estado arranca limpio con los datos de ese momento.
+  if (!apertura) return null;
+  return <HojaFactura apertura={apertura} onCerrar={onCerrar} />;
+}
+
+interface EstadoInicial {
+  lineas: Linea[];
+  modoPrecio: ModoPrecio;
+  moneda: Moneda;
+  tasaTxt: string | null;
+  comercioId: number | null;
+  metodo: MetodoPago;
+  foto: string | null;
+}
+
+function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompraStore.getState>): EstadoInicial {
+  const { items, facturas, comercios } = st;
+  const factura = apertura.facturaId != null ? facturas.find((f) => f.id === apertura.facturaId) : undefined;
+  if (factura) {
+    const suyos = items.filter((i) => i.factura_id === factura.id);
+    const moneda: Moneda = st.moneda === 'USD' && suyos.every((i) => i.precio_pagado_usd != null) ? 'USD' : 'BS';
+    return {
+      moneda,
+      modoPrecio: 'total',
+      lineas: suyos.map((i) => ({
+        itemId: i.id,
+        cantidadTxt: formatCantidad(i.cantidad_comprada) || '1',
+        precioTxt: formatNumero((moneda === 'USD' ? i.precio_pagado_usd : i.precio_pagado_bs) ?? 0),
+      })),
+      tasaTxt: factura.tasa_bs ? formatNumero(factura.tasa_bs) : null,
+      comercioId: factura.comercio_id,
+      metodo: factura.metodo_pago ?? st.ultimoMetodo,
+      foto: factura.foto_uri,
+    };
+  }
+  return {
+    moneda: st.moneda,
+    modoPrecio: 'unitario',
+    lineas: apertura.itemIds.map((id) => nuevaLinea(items.find((i) => i.id === id))),
+    tasaTxt: null,
+    comercioId:
+      st.ultimoComercioId && comercios.some((c) => c.id === st.ultimoComercioId) ? st.ultimoComercioId : comercios[0]?.id ?? null,
+    metodo: st.ultimoMetodo,
+    foto: null,
+  };
+}
+
+function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerrar: () => void }) {
   const insets = useSafeAreaInsets();
   const st = useCompraStore();
-  const { items, facturas, referencias, comercios } = st;
+  const { items, referencias, comercios } = st;
+  const [inicial] = useState(() => estadoInicial(apertura, useCompraStore.getState()));
 
-  const [lineas, setLineas] = useState<Linea[]>([]);
-  const [modoPrecio, setModoPrecio] = useState<ModoPrecio>('unitario');
-  const [moneda, setMonedaLocal] = useState<Moneda>('USD');
-  const [tasaTxt, setTasaTxt] = useState('');
-  const [comercioId, setComercioId] = useState<number | null>(null);
-  const [metodo, setMetodo] = useState<MetodoPago>('Tarjeta');
-  const [foto, setFoto] = useState<string | null>(null);
+  const [lineas, setLineas] = useState<Linea[]>(inicial.lineas);
+  const [modoPrecio, setModoPrecio] = useState<ModoPrecio>(inicial.modoPrecio);
+  const [moneda, setMonedaLocal] = useState<Moneda>(inicial.moneda);
+  // null = usar la tasa del día (se completa sola si llega la automática con la hoja abierta).
+  const [tasaEditada, setTasaTxt] = useState<string | null>(inicial.tasaTxt);
+  const [comercioId, setComercioId] = useState<number | null>(inicial.comercioId);
+  const [metodo, setMetodo] = useState<MetodoPago>(inicial.metodo);
+  const [foto, setFoto] = useState<string | null>(inicial.foto);
   const [nuevoComercio, setNuevoComercio] = useState<string | null>(null);
   const [mostrarPendientes, setMostrarPendientes] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
-  // Precarga cada vez que se abre.
-  useEffect(() => {
-    if (!apertura) return;
-    setNuevoComercio(null);
-    setMostrarPendientes(false);
-    setGuardando(false);
-    const factura = apertura.facturaId != null ? facturas.find((f) => f.id === apertura.facturaId) : undefined;
-    if (factura) {
-      const suyos = items.filter((i) => i.factura_id === factura.id);
-      const enUsd = st.moneda === 'USD' && suyos.every((i) => i.precio_pagado_usd != null);
-      const m: Moneda = enUsd ? 'USD' : 'BS';
-      setMonedaLocal(m);
-      setModoPrecio('total');
-      setLineas(
-        suyos.map((i) => ({
-          itemId: i.id,
-          cantidadTxt: formatCantidad(i.cantidad_comprada) || '1',
-          precioTxt: formatNumero((m === 'USD' ? i.precio_pagado_usd : i.precio_pagado_bs) ?? 0),
-        })),
-      );
-      setTasaTxt(factura.tasa_bs ? formatNumero(factura.tasa_bs) : st.tasaBs ? formatNumero(st.tasaBs) : '');
-      setComercioId(factura.comercio_id);
-      setMetodo(factura.metodo_pago ?? st.ultimoMetodo);
-      setFoto(factura.foto_uri);
-    } else {
-      setMonedaLocal(st.moneda);
-      setModoPrecio('unitario');
-      setLineas(apertura.itemIds.map((id) => nuevaLinea(items.find((i) => i.id === id))));
-      setTasaTxt(st.tasaBs ? formatNumero(st.tasaBs) : '');
-      setComercioId(
-        st.ultimoComercioId && comercios.some((c) => c.id === st.ultimoComercioId) ? st.ultimoComercioId : comercios[0]?.id ?? null,
-      );
-      setMetodo(st.ultimoMetodo);
-      setFoto(null);
-    }
-  }, [apertura]);
-
+  const tasaTxt = tasaEditada ?? (st.tasaBs ? formatNumero(st.tasaBs) : '');
   const tasa = parseMonto(tasaTxt);
   const itemDe = (id: number) => items.find((i) => i.id === id);
 
@@ -233,7 +247,7 @@ export function FacturaSheet({ apertura, onCerrar }: { apertura: AperturaFactura
     lineas.length === 1 && !editando ? itemDe(lineas[0].itemId)?.producto_nombre : `Factura · ${lineas.length} ${lineas.length === 1 ? 'producto' : 'productos'}`;
 
   return (
-    <Modal visible={!!apertura} transparent animationType="slide" onRequestClose={onCerrar} statusBarTranslucent>
+    <Modal visible transparent animationType="slide" onRequestClose={onCerrar} statusBarTranslucent>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={s.fondo} onPress={onCerrar} accessibilityLabel="Cerrar" />
         <View style={[s.hoja, { paddingBottom: insets.bottom + 12 }]}>

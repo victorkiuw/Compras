@@ -3,6 +3,7 @@ import * as repo from '../db/repo';
 import type { Comercio, DatosFactura, Factura, Item, Lista, MetodoPago, ReferenciaPrecio } from '../db/repo';
 import type { Moneda } from '../lib/format';
 import type { ItemParseado } from '../lib/parser';
+import { obtenerTasa, type TipoTasa } from '../lib/tasa';
 
 interface CompraState {
   listo: boolean;
@@ -17,13 +18,24 @@ interface CompraState {
   /** Bolívares por dólar que se usan por defecto en las facturas nuevas. */
   tasaBs: number | null;
   tasaFecha: string | null;
+  /** 'auto' = descargada de internet, 'manual' = escrita por el usuario. */
+  tasaOrigen: 'auto' | 'manual' | null;
+  tasaFuente: string | null;
+  tasaTipo: TipoTasa;
+  actualizandoTasa: boolean;
+  /** true si el último intento automático falló (sin conexión, servicio caído). */
+  tasaSinConexion: boolean;
   /** Moneda en la que se escriben los precios por defecto. */
   moneda: Moneda;
 
   iniciar: () => Promise<void>;
   recargar: () => Promise<void>;
   recargarComercios: () => Promise<void>;
+  /** Tasa escrita a mano (se usa hasta el día siguiente o hasta pedir la automática). */
   setTasa: (tasa: number) => Promise<void>;
+  /** Descarga la tasa. Sin `forzar`, solo si la guardada no es de hoy o no es automática del tipo elegido. */
+  actualizarTasa: (forzar?: boolean) => Promise<boolean>;
+  setTasaTipo: (tipo: TipoTasa) => Promise<void>;
   setMoneda: (moneda: Moneda) => Promise<void>;
   importar: (items: ItemParseado[], modo: 'nueva' | 'agregar') => Promise<void>;
   guardarFactura: (facturaId: number | null, datos: DatosFactura) => Promise<void>;
@@ -45,12 +57,18 @@ export const useCompraStore = create<CompraState>((set, get) => ({
   ultimoMetodo: 'Tarjeta',
   tasaBs: null,
   tasaFecha: null,
+  tasaOrigen: null,
+  tasaFuente: null,
+  tasaTipo: 'oficial',
+  actualizandoTasa: false,
+  tasaSinConexion: false,
   moneda: 'USD',
 
   iniciar: async () => {
     try {
       await Promise.all([get().recargar(), get().recargarComercios()]);
       set({ listo: true, error: null });
+      get().actualizarTasa();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -58,7 +76,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
 
   recargar: async () => {
     const lista = await repo.getListaActiva();
-    const [items, facturas, referencias, ultimoComercio, ultimoMetodo, tasa, tasaFecha, moneda] = await Promise.all([
+    const [items, facturas, referencias, ultimoComercio, ultimoMetodo, tasa, tasaFecha, moneda, origen, fuente, tipo] = await Promise.all([
       lista ? repo.getItems(lista.id) : Promise.resolve([]),
       lista ? repo.getFacturas(lista.id) : Promise.resolve([]),
       lista ? repo.referenciasDeLista(lista.id) : Promise.resolve(new Map<number, ReferenciaPrecio>()),
@@ -67,6 +85,9 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       repo.getAjuste('tasa_bs'),
       repo.getAjuste('tasa_fecha'),
       repo.getAjuste('moneda'),
+      repo.getAjuste('tasa_origen'),
+      repo.getAjuste('tasa_fuente'),
+      repo.getAjuste('tasa_tipo'),
     ]);
     set({
       lista,
@@ -78,6 +99,9 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       tasaBs: tasa ? Number(tasa) : null,
       tasaFecha,
       moneda: moneda === 'BS' ? 'BS' : 'USD',
+      tasaOrigen: origen === 'auto' || origen === 'manual' ? origen : null,
+      tasaFuente: fuente,
+      tasaTipo: tipo === 'paralelo' ? 'paralelo' : 'oficial',
     });
   },
 
@@ -87,9 +111,40 @@ export const useCompraStore = create<CompraState>((set, get) => ({
 
   setTasa: async (tasa) => {
     const fecha = new Date().toISOString();
-    await repo.setAjuste('tasa_bs', String(tasa));
-    await repo.setAjuste('tasa_fecha', fecha);
-    set({ tasaBs: tasa, tasaFecha: fecha });
+    await guardarTasa(tasa, fecha, 'manual', null);
+    set({ tasaBs: tasa, tasaFecha: fecha, tasaOrigen: 'manual', tasaFuente: null });
+  },
+
+  actualizarTasa: async (forzar = false) => {
+    const { tasaFecha, tasaOrigen, tasaFuente, tasaTipo, actualizandoTasa } = get();
+    if (actualizandoTasa) return false;
+    const deHoy = !!tasaFecha && esHoy(tasaFecha);
+    // La tasa escrita a mano hoy se respeta; la automática se renueva una vez al día.
+    if (!forzar && deHoy && (tasaOrigen === 'manual' || tasaFuente?.endsWith(`(${tasaTipo})`))) return true;
+    // Sin conexión no se reintenta en cada cambio de pantalla, solo cada 2 minutos.
+    if (!forzar && Date.now() - ultimoFallo < 120_000) return false;
+    set({ actualizandoTasa: true });
+    try {
+      const r = await obtenerTasa(tasaTipo);
+      if (!r) {
+        ultimoFallo = Date.now();
+        set({ tasaSinConexion: true });
+        return false;
+      }
+      const fecha = new Date().toISOString();
+      const fuente = `${r.fuente} (${tasaTipo})`;
+      await guardarTasa(r.tasa, fecha, 'auto', fuente);
+      set({ tasaBs: r.tasa, tasaFecha: fecha, tasaOrigen: 'auto', tasaFuente: fuente, tasaSinConexion: false });
+      return true;
+    } finally {
+      set({ actualizandoTasa: false });
+    }
+  },
+
+  setTasaTipo: async (tipo) => {
+    await repo.setAjuste('tasa_tipo', tipo);
+    set({ tasaTipo: tipo });
+    await get().actualizarTasa(true);
   },
 
   setMoneda: async (moneda) => {
@@ -131,6 +186,17 @@ export const useCompraStore = create<CompraState>((set, get) => ({
     await get().recargar();
   },
 }));
+
+let ultimoFallo = 0;
+
+const esHoy = (iso: string) => new Date(iso).toDateString() === new Date().toDateString();
+
+async function guardarTasa(tasa: number, fecha: string, origen: 'auto' | 'manual', fuente: string | null) {
+  await repo.setAjuste('tasa_bs', String(tasa));
+  await repo.setAjuste('tasa_fecha', fecha);
+  await repo.setAjuste('tasa_origen', origen);
+  await repo.setAjuste('tasa_fuente', fuente);
+}
 
 export function totalGastado(items: Item[]): { bs: number; usd: number } {
   let bs = 0;

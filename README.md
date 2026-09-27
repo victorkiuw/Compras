@@ -10,7 +10,7 @@ precios para saber dónde conviene comprar cada cosa. Los precios se anotan en d
 
 | Pantalla | Qué hace |
 | --- | --- |
-| **Compra** | Lista activa con *Pendientes* / *Comprados*, progreso (8/15), total pagado en Bs. y en $, y la **tasa del día** (Bs por $). Bajo cada pendiente: último precio pagado (y su equivalente en Bs. a la tasa de hoy) y el comercio más barato conocido. Mantén presionado para **elegir varios productos y registrarlos en una misma factura**. |
+| **Compra** | Lista activa con *Pendientes* / *Comprados*, progreso (8/15), total pagado en Bs. y en $, y la **tasa del día** (Bs por $), que se descarga sola: BCV oficial o paralelo, una vez al día al abrir la app (con botón para actualizar y opción de escribirla a mano; sin conexión se usa la última guardada). Bajo cada pendiente: último precio pagado (y su equivalente en Bs. a la tasa de hoy) y el comercio más barato conocido. Mantén presionado para **elegir varios productos y registrarlos en una misma factura**. |
 | **Factura** | Hoja inferior para registrar uno o varios productos juntos: cantidad (con +/−) vs. pedida, precio por unidad o total en **$ o Bs.**, tasa, comercio, **Tarjeta / Pago Móvil** y foto del ticket. Se pueden sumar más productos pendientes a la misma factura. En *Comprados* se ven agrupados por factura; tocar una la abre para editarla. |
 | **Pegar lista** | Pega el mensaje de WhatsApp (se toma del portapapeles automáticamente). Entiende viñetas, emojis, `*negritas*`, prefijos de chat exportado y cantidades como `2 kg de harina`, `Harina x3`, `Queso 1/2 kilo`, `3 cajas de leche`. Puedes descartar líneas antes de crear la lista. |
 | **Precios** | Buscador de productos con los comercios ordenados del más barato al más caro (en $, con su equivalente en Bs. hoy). |
@@ -61,6 +61,7 @@ npm install
 npx expo start          # escanea el QR con Expo Go en el teléfono
 npm test                # pruebas del parser, montos y cálculo de ahorro
 npm run typecheck
+npm run lint
 ```
 
 Todas las librerías usadas vienen incluidas en Expo Go, así que no hace falta una build

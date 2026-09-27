@@ -13,7 +13,9 @@ export default function Radar() {
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState<ProductoRadar[]>([]);
   const busquedaRef = useRef(busqueda);
-  busquedaRef.current = busqueda;
+  useEffect(() => {
+    busquedaRef.current = busqueda;
+  }, [busqueda]);
 
   const buscar = useCallback(async (texto: string) => {
     setResultados(await repo.buscarPrecios(texto));

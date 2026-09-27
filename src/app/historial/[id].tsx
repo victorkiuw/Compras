@@ -1,7 +1,7 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Boton, colores, estilos, Icono } from '../../components/ui';
+import { Boton, colores, estilos } from '../../components/ui';
 import * as repo from '../../db/repo';
 import type { Factura, Item, Lista } from '../../db/repo';
 import { formatBs, formatCantidad, formatFechaHora, formatTasa, formatUsd } from '../../lib/format';

@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FacturaSheet, type AperturaFactura } from '../../components/FacturaSheet';
 import { TasaModal } from '../../components/TasaModal';
@@ -17,7 +17,8 @@ type Pestana = 'pendientes' | 'comprados';
 
 export default function ModoCompra() {
   const insets = useSafeAreaInsets();
-  const { lista, items, facturas, referencias, tasaBs, tasaFecha, setTasa, recargar, eliminarItems, cerrar } = useCompraStore();
+  const { lista, items, facturas, referencias, tasaBs, tasaFecha, tasaOrigen, tasaTipo, actualizandoTasa, tasaSinConexion, actualizarTasa, recargar, eliminarItems, cerrar } =
+    useCompraStore();
   const [pestana, setPestana] = useState<Pestana>('pendientes');
   const [apertura, setApertura] = useState<AperturaFactura | null>(null);
   const [seleccion, setSeleccion] = useState<Set<number> | null>(null);
@@ -27,7 +28,8 @@ export default function ModoCompra() {
   useFocusEffect(
     useCallback(() => {
       recargar();
-    }, [recargar]),
+      actualizarTasa();
+    }, [recargar, actualizarTasa]),
   );
 
   const pendientes = useMemo(() => items.filter((i) => !i.comprado), [items]);
@@ -35,6 +37,15 @@ export default function ModoCompra() {
   const total = totalGastado(items);
   const progreso = items.length ? comprados / items.length : 0;
   const tasaEsDeHoy = !!tasaFecha && haceCuanto(tasaFecha) === 'hoy';
+  const colorTasa = tasaEsDeHoy || actualizandoTasa ? colores.acento : colores.aviso;
+  const etiquetaTasa = tasaOrigen === 'manual' ? 'Tasa manual' : tasaTipo === 'oficial' ? 'BCV' : 'Paralelo';
+  const textoTasa = actualizandoTasa && !tasaBs
+    ? 'Buscando la tasa del día…'
+    : !tasaBs
+      ? tasaSinConexion
+        ? 'Sin conexión: toca para escribir la tasa'
+        : 'Toca para fijar la tasa (Bs por $)'
+      : `${etiquetaTasa}: ${formatTasa(tasaBs)}${tasaEsDeHoy ? ' · hoy' : ` · ${haceCuanto(tasaFecha!)}${tasaSinConexion ? ', sin conexión' : ''}`}`;
 
   const agregarRapido = async () => {
     const parseado = parseLinea(nuevoTexto);
@@ -142,17 +153,21 @@ export default function ModoCompra() {
         <View style={s.barra}>
           <View style={[s.barraRelleno, { width: `${progreso * 100}%` }]} />
         </View>
-        <Pressable
-          onPress={() => setEditandoTasa(true)}
-          style={[s.tasa, !tasaEsDeHoy && { backgroundColor: colores.avisoSuave }]}
-          accessibilityLabel="Cambiar tasa del día"
-        >
-          <Icono name="swap-horizontal" size={18} color={tasaEsDeHoy ? colores.acento : colores.aviso} />
-          <Text style={[s.tasaTexto, !tasaEsDeHoy && { color: colores.aviso }]}>
-            {tasaBs ? `Tasa: ${formatTasa(tasaBs)}${tasaEsDeHoy ? '' : ` · ${haceCuanto(tasaFecha!)}, ¿actualizar?`}` : 'Fija la tasa del día (Bs por $)'}
-          </Text>
-          <Icono name="create-outline" size={18} color={tasaEsDeHoy ? colores.acento : colores.aviso} />
-        </Pressable>
+        <View style={[s.tasa, !tasaEsDeHoy && !actualizandoTasa && { backgroundColor: colores.avisoSuave }]}>
+          <Pressable onPress={() => setEditandoTasa(true)} style={s.tasaInfo} accessibilityLabel="Ver o cambiar la tasa del día">
+            <Icono name="swap-horizontal" size={18} color={colorTasa} />
+            <Text style={[s.tasaTexto, { color: colorTasa }]} numberOfLines={1}>
+              {textoTasa}
+            </Text>
+          </Pressable>
+          {actualizandoTasa ? (
+            <ActivityIndicator size="small" color={colores.acento} />
+          ) : (
+            <Pressable onPress={() => actualizarTasa(true)} hitSlop={10} accessibilityLabel="Actualizar tasa">
+              <Icono name="refresh" size={20} color={colorTasa} />
+            </Pressable>
+          )}
+        </View>
         {lista && (
           <Segmentado
             opciones={[
@@ -242,7 +257,7 @@ export default function ModoCompra() {
       )}
 
       <FacturaSheet apertura={apertura} onCerrar={() => setApertura(null)} />
-      <TasaModal visible={editandoTasa} tasaActual={tasaBs} onGuardar={setTasa} onCerrar={() => setEditandoTasa(false)} />
+      <TasaModal visible={editandoTasa} onCerrar={() => setEditandoTasa(false)} />
     </View>
   );
 }
@@ -376,6 +391,7 @@ const s = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colores.acentoSuave,
   },
+  tasaInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40 },
   tasaTexto: { flex: 1, fontSize: 15, fontWeight: '600', color: colores.acento },
   ayuda: { fontSize: 13, color: colores.textoSuave, textAlign: 'center', marginBottom: 2 },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
