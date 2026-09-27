@@ -1,0 +1,74 @@
+name: APK Android
+
+# Compila el APK instalable en los servidores de GitHub (que traen el SDK de Android)
+# y lo publica como Release para descargarlo desde el teléfono.
+on:
+  push:
+    branches: [main, master, claude/shopping-app-business-4sa5i2]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar (tipos, lint y pruebas)
+        run: |
+          npx tsc --noEmit
+          npx expo lint
+          npm test
+
+      - name: Generar proyecto Android
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Número de versión
+        # Cada compilación sube el versionCode para que el APK nuevo se instale encima del anterior.
+        run: sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" android/app/build.gradle
+
+      - name: Compilar APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Renombrar APK
+        run: |
+          mkdir -p salida
+          cp android/app/build/outputs/apk/release/app-release.apk "salida/Compras-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Compras-apk-${{ github.run_number }}
+          path: salida/*.apk
+
+      - name: Publicar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "apk-${{ github.run_number }}" salida/*.apk \
+            --target "${{ github.sha }}" \
+            --title "Compras · versión ${{ github.run_number }}" \
+            --notes "APK para Android generado automáticamente desde ${{ github.ref_name }} (${GITHUB_SHA::7}). Descárgalo desde el teléfono y ábrelo para instalar."
