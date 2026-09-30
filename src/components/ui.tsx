@@ -70,11 +70,13 @@ export function Chip({
   texto,
   activo,
   onPress,
+  onLongPress,
   icono,
 }: {
   texto: string;
   activo: boolean;
   onPress: () => void;
+  onLongPress?: () => void;
   icono?: NombreIcono;
 }) {
   return (
@@ -82,6 +84,7 @@ export function Chip({
       accessibilityRole="button"
       accessibilityState={{ selected: activo }}
       onPress={onPress}
+      onLongPress={onLongPress}
       style={[estilos.chip, activo && { backgroundColor: colores.primario, borderColor: colores.primario }]}
     >
       {icono && <Icono name={icono} size={16} color={activo ? '#fff' : colores.textoSuave} />}

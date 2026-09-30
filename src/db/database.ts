@@ -116,21 +116,114 @@ const MIGRACIONES: Migracion[] = [
       await db.runAsync('UPDATE item_compra SET factura_id = ? WHERE id = ?', r.lastInsertRowId, i.id);
     }
   },
+
+  // v3: métodos Efectivo/Crédito (se reconstruye item_compra para quitar el CHECK de
+  // metodo_pago), notas y "no había" por producto, créditos con abonos y listas frecuentes.
+  `
+  CREATE TABLE item_compra_v3 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lista_id INTEGER NOT NULL REFERENCES lista_compra(id) ON DELETE CASCADE,
+    producto_id INTEGER NOT NULL REFERENCES producto(id),
+    texto_original TEXT,
+    unidad TEXT,
+    cantidad_pedida REAL,
+    cantidad_comprada REAL,
+    precio_pagado_bs REAL,
+    comercio_id INTEGER REFERENCES comercio(id) ON DELETE SET NULL,
+    metodo_pago TEXT,
+    comprado INTEGER NOT NULL DEFAULT 0,
+    comprado_en TEXT,
+    foto_factura_uri TEXT,
+    orden INTEGER NOT NULL DEFAULT 0,
+    factura_id INTEGER REFERENCES factura(id) ON DELETE SET NULL,
+    precio_pagado_usd REAL,
+    tasa_bs REAL,
+    nota TEXT,
+    no_disponible INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO item_compra_v3 (id, lista_id, producto_id, texto_original, unidad, cantidad_pedida, cantidad_comprada,
+    precio_pagado_bs, comercio_id, metodo_pago, comprado, comprado_en, foto_factura_uri, orden, factura_id,
+    precio_pagado_usd, tasa_bs)
+  SELECT id, lista_id, producto_id, texto_original, unidad, cantidad_pedida, cantidad_comprada,
+    precio_pagado_bs, comercio_id, metodo_pago, comprado, comprado_en, foto_factura_uri, orden, factura_id,
+    precio_pagado_usd, tasa_bs
+  FROM item_compra;
+  DROP TABLE item_compra;
+  ALTER TABLE item_compra_v3 RENAME TO item_compra;
+  CREATE INDEX idx_item_lista ON item_compra(lista_id);
+  CREATE INDEX idx_item_factura ON item_compra(factura_id);
+
+  ALTER TABLE factura ADD COLUMN vence TEXT;
+  ALTER TABLE factura ADD COLUMN pagada_en TEXT;
+
+  CREATE TABLE abono (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    factura_id INTEGER NOT NULL REFERENCES factura(id) ON DELETE CASCADE,
+    monto_usd REAL NOT NULL,
+    fecha TEXT NOT NULL,
+    nota TEXT
+  );
+  CREATE INDEX idx_abono_factura ON abono(factura_id);
+
+  CREATE TABLE plantilla (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    texto TEXT NOT NULL,
+    creada TEXT NOT NULL
+  );
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 async function migrar(db: SQLite.SQLiteDatabase) {
-  await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  await db.execAsync('PRAGMA journal_mode = WAL;');
   const fila = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const version = fila?.user_version ?? 0;
-  for (let v = version; v < MIGRACIONES.length; v++) {
-    await db.withTransactionAsync(async () => {
-      const m = MIGRACIONES[v];
-      if (typeof m === 'string') await db.execAsync(m);
-      else await m(db);
-      await db.execAsync(`PRAGMA user_version = ${v + 1}`);
-    });
+  // Las claves foráneas se desactivan durante las migraciones (fuera de la transacción,
+  // si no SQLite lo ignora) para poder reconstruir tablas referenciadas.
+  await db.execAsync('PRAGMA foreign_keys = OFF;');
+  try {
+    for (let v = version; v < MIGRACIONES.length; v++) {
+      await db.withTransactionAsync(async () => {
+        const m = MIGRACIONES[v];
+        if (typeof m === 'string') await db.execAsync(m);
+        else await m(db);
+        const rotas = await db.getAllAsync('PRAGMA foreign_key_check');
+        if (rotas.length) throw new Error(`Migración ${v + 1}: ${rotas.length} referencias inválidas`);
+        await db.execAsync(`PRAGMA user_version = ${v + 1}`);
+      });
+    }
+  } finally {
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+  }
+}
+
+/** Copia binaria de toda la base de datos (para respaldos). */
+export async function exportarBaseDatos(): Promise<Uint8Array> {
+  const db = await getDb();
+  return db.serializeAsync();
+}
+
+/**
+ * Reemplaza todos los datos por los de un respaldo. Valida que sea una base de esta app
+ * y la actualiza a la versión actual del esquema.
+ */
+export async function restaurarBaseDatos(bytes: Uint8Array) {
+  const cabecera = String.fromCharCode(...bytes.slice(0, 15));
+  if (cabecera !== 'SQLite format 3') throw new Error('El archivo no es un respaldo válido.');
+  const origen = await SQLite.deserializeDatabaseAsync(bytes);
+  try {
+    const tablas = await origen.getAllAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'");
+    const nombres = new Set(tablas.map((t) => t.name));
+    if (!['lista_compra', 'item_compra', 'producto', 'comercio'].every((t) => nombres.has(t))) {
+      throw new Error('El archivo no es un respaldo de esta app.');
+    }
+    const db = await getDb();
+    await SQLite.backupDatabaseAsync({ sourceDatabase: origen, destDatabase: db });
+    await migrar(db);
+  } finally {
+    await origen.closeAsync();
   }
 }
 

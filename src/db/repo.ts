@@ -3,7 +3,8 @@ import { normalizarNombre, type ItemParseado } from '../lib/parser';
 import { getDb } from './database';
 
 export type TipoComercio = 'Mayorista' | 'Supermercado' | 'Otro';
-export type MetodoPago = 'Tarjeta' | 'Pago Móvil';
+export type MetodoPago = 'Tarjeta' | 'Pago Móvil' | 'Efectivo' | 'Crédito';
+export const METODOS_PAGO: MetodoPago[] = ['Tarjeta', 'Pago Móvil', 'Efectivo', 'Crédito'];
 
 export interface Comercio {
   id: number;
@@ -39,6 +40,9 @@ export interface Item {
   comprado_en: string | null;
   foto_factura_uri: string | null;
   factura_id: number | null;
+  nota: string | null;
+  /** 1 = se buscó y no había. */
+  no_disponible: number;
 }
 
 export interface Factura {
@@ -52,6 +56,9 @@ export interface Factura {
   total_bs: number;
   total_usd: number | null;
   fecha: string;
+  /** Solo en facturas a crédito: fecha límite de pago (ISO) y cuándo quedó saldada. */
+  vence: string | null;
+  pagada_en: string | null;
 }
 
 /** Último precio conocido de un producto en un comercio. */
@@ -85,6 +92,8 @@ export interface DatosFactura {
   metodo: MetodoPago;
   tasaBs: number | null;
   fotoUri: string | null;
+  /** Fecha de vencimiento si es a crédito. */
+  vence: string | null;
   lineas: LineaFactura[];
 }
 
@@ -190,7 +199,8 @@ export async function getFacturas(listaId: number): Promise<Factura[]> {
   );
 }
 
-async function obtenerOCrearProducto(nombre: string, unidad: string | null): Promise<number> {
+/** Devuelve el producto (creándolo si hace falta) y la unidad que se recuerda para él. */
+async function obtenerOCrearProducto(nombre: string, unidad: string | null): Promise<{ id: number; unidad: string | null }> {
   const db = await getDb();
   const clave = normalizarNombre(nombre);
   const existente = await db.getFirstAsync<{ id: number; unidad: string | null }>(
@@ -201,7 +211,7 @@ async function obtenerOCrearProducto(nombre: string, unidad: string | null): Pro
     if (!existente.unidad && unidad) {
       await db.runAsync('UPDATE producto SET unidad = ? WHERE id = ?', unidad, existente.id);
     }
-    return existente.id;
+    return { id: existente.id, unidad: unidad ?? existente.unidad };
   }
   const r = await db.runAsync(
     'INSERT INTO producto (nombre, nombre_normalizado, unidad) VALUES (?, ?, ?)',
@@ -209,7 +219,7 @@ async function obtenerOCrearProducto(nombre: string, unidad: string | null): Pro
     clave,
     unidad,
   );
-  return r.lastInsertRowId;
+  return { id: r.lastInsertRowId, unidad };
 }
 
 export async function crearLista(): Promise<number> {
@@ -227,15 +237,17 @@ export async function agregarItems(listaId: number, items: ItemParseado[]) {
     );
     let orden = (fila?.m ?? 0) + 1;
     for (const it of items) {
-      const productoId = await obtenerOCrearProducto(it.nombre, it.unidad);
+      // Si el mensaje no trae unidad, se usa la última que se eligió para ese producto.
+      const producto = await obtenerOCrearProducto(it.nombre, it.unidad);
       await db.runAsync(
-        `INSERT INTO item_compra (lista_id, producto_id, texto_original, unidad, cantidad_pedida, orden)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO item_compra (lista_id, producto_id, texto_original, unidad, cantidad_pedida, nota, orden)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         listaId,
-        productoId,
+        producto.id,
         it.original,
-        it.unidad,
+        producto.unidad,
         it.cantidad,
+        it.nota ?? null,
         orden++,
       );
     }
@@ -282,22 +294,24 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
   await db.withTransactionAsync(async () => {
     if (id == null) {
       const r = await db.runAsync(
-        'INSERT INTO factura (lista_id, comercio_id, metodo_pago, tasa_bs, foto_uri, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO factura (lista_id, comercio_id, metodo_pago, tasa_bs, foto_uri, vence, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)',
         listaId,
         d.comercioId,
         d.metodo,
         d.tasaBs,
         d.fotoUri,
+        d.metodo === 'Crédito' ? d.vence : null,
         fecha,
       );
       id = r.lastInsertRowId;
     } else {
       await db.runAsync(
-        'UPDATE factura SET comercio_id = ?, metodo_pago = ?, tasa_bs = ?, foto_uri = ? WHERE id = ?',
+        'UPDATE factura SET comercio_id = ?, metodo_pago = ?, tasa_bs = ?, foto_uri = ?, vence = ? WHERE id = ?',
         d.comercioId,
         d.metodo,
         d.tasaBs,
         d.fotoUri,
+        d.metodo === 'Crédito' ? d.vence : null,
         id,
       );
       const anteriores = await db.getAllAsync<{ id: number }>('SELECT id FROM item_compra WHERE factura_id = ?', id);
@@ -350,6 +364,7 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
     }
 
     await db.runAsync(RECALCULAR_FACTURA, id);
+    await actualizarEstadoCredito(id!);
     await db.runAsync(
       `INSERT INTO ajuste (clave, valor) VALUES ('ultimo_comercio', ?), ('ultimo_metodo', ?)
        ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`,
@@ -407,8 +422,10 @@ export async function cerrarLista(listaId: number, moverPendientes: boolean): Pr
   const db = await getDb();
   await db.runAsync(
     `UPDATE lista_compra SET estado = 'Cerrada', cerrada_en = ?,
-       total_gastado_bs = (SELECT COALESCE(SUM(precio_pagado_bs), 0) FROM item_compra WHERE lista_id = ? AND comprado = 1),
-       total_gastado_usd = (SELECT SUM(precio_pagado_usd) FROM item_compra WHERE lista_id = ? AND comprado = 1)
+       total_gastado_bs = (SELECT COALESCE(SUM(precio_pagado_bs), 0) FROM item_compra
+         WHERE lista_id = ? AND comprado = 1 AND COALESCE(metodo_pago, '') <> 'Crédito'),
+       total_gastado_usd = (SELECT SUM(precio_pagado_usd) FROM item_compra
+         WHERE lista_id = ? AND comprado = 1 AND COALESCE(metodo_pago, '') <> 'Crédito')
      WHERE id = ?`,
     ahora(),
     listaId,
@@ -422,7 +439,17 @@ export async function cerrarLista(listaId: number, moverPendientes: boolean): Pr
   );
   if (!pendientes?.n) return null;
   const nueva = await crearLista();
-  await db.runAsync('UPDATE item_compra SET lista_id = ? WHERE lista_id = ? AND comprado = 0', nueva, listaId);
+  await db.withTransactionAsync(async () => {
+    // Los que no había se quedan registrados en la compra cerrada (para el reporte) y se copian a la nueva.
+    await db.runAsync(
+      `INSERT INTO item_compra (lista_id, producto_id, texto_original, unidad, cantidad_pedida, nota, orden)
+       SELECT ?, producto_id, texto_original, unidad, cantidad_pedida, nota, orden
+       FROM item_compra WHERE lista_id = ? AND comprado = 0 AND no_disponible = 1`,
+      nueva,
+      listaId,
+    );
+    await db.runAsync('UPDATE item_compra SET lista_id = ? WHERE lista_id = ? AND comprado = 0 AND no_disponible = 0', nueva, listaId);
+  });
   return nueva;
 }
 
@@ -437,6 +464,8 @@ export interface ResumenLista extends Lista {
   items: number;
   comprados: number;
   facturas: number;
+  /** Lo comprado a crédito en esa compra (no está en total_gastado). */
+  credito_usd: number;
 }
 
 export async function listarListasCerradas(): Promise<ResumenLista[]> {
@@ -445,7 +474,8 @@ export async function listarListasCerradas(): Promise<ResumenLista[]> {
     `SELECT l.*,
        (SELECT COUNT(*) FROM item_compra i WHERE i.lista_id = l.id) AS items,
        (SELECT COUNT(*) FROM item_compra i WHERE i.lista_id = l.id AND i.comprado = 1) AS comprados,
-       (SELECT COUNT(*) FROM factura f WHERE f.lista_id = l.id) AS facturas
+       (SELECT COUNT(*) FROM factura f WHERE f.lista_id = l.id) AS facturas,
+       (SELECT COALESCE(SUM(f.total_usd), 0) FROM factura f WHERE f.lista_id = l.id AND f.metodo_pago = 'Crédito') AS credito_usd
      FROM lista_compra l
      WHERE l.estado = 'Cerrada'
      ORDER BY l.fecha DESC, l.id DESC`,
@@ -550,4 +580,253 @@ export async function historialProducto(productoId: number): Promise<RegistroHis
      ORDER BY r.fecha DESC, r.id DESC`,
     productoId,
   );
+}
+
+// ───────────── Edición de la lista ─────────────
+
+export interface CambiosItem {
+  nombre: string;
+  cantidad: number | null;
+  unidad: string | null;
+  nota: string | null;
+}
+
+/** Edita un producto de la lista. La unidad elegida se recuerda para ese producto. */
+export async function actualizarItem(itemId: number, c: CambiosItem) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    const producto = await obtenerOCrearProducto(c.nombre.trim(), c.unidad);
+    if (c.unidad) await db.runAsync('UPDATE producto SET unidad = ? WHERE id = ?', c.unidad, producto.id);
+    await db.runAsync(
+      'UPDATE item_compra SET producto_id = ?, cantidad_pedida = ?, unidad = ?, nota = ? WHERE id = ?',
+      producto.id,
+      c.cantidad,
+      c.unidad,
+      c.nota?.trim() || null,
+      itemId,
+    );
+    // Si ya estaba comprado, su precio histórico pasa al producto corregido.
+    await db.runAsync('UPDATE registro_precio_historico SET producto_id = ?, unidad = ? WHERE item_id = ?', producto.id, c.unidad, itemId);
+  });
+}
+
+export async function marcarNoDisponible(itemIds: number[], valor: boolean) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const id of itemIds) {
+      await db.runAsync('UPDATE item_compra SET no_disponible = ? WHERE id = ? AND comprado = 0', valor ? 1 : 0, id);
+    }
+  });
+}
+
+export interface SugerenciaProducto {
+  id: number;
+  nombre: string;
+  unidad: string | null;
+  precio_usd: number | null;
+  precio_bs: number | null;
+  comercio_nombre: string | null;
+}
+
+/** Autocompletado: productos conocidos que coinciden con lo escrito, con su último precio. */
+export async function sugerirProductos(texto: string, limite = 5): Promise<SugerenciaProducto[]> {
+  const clave = normalizarNombre(texto);
+  if (clave.length < 2) return [];
+  const db = await getDb();
+  return db.getAllAsync<SugerenciaProducto>(
+    `SELECT p.id, p.nombre, p.unidad,
+       r.precio_unitario_usd AS precio_usd, r.precio_unitario_bs AS precio_bs, c.nombre AS comercio_nombre
+     FROM producto p
+     LEFT JOIN registro_precio_historico r ON r.id = (
+       SELECT id FROM registro_precio_historico WHERE producto_id = p.id ORDER BY fecha DESC, id DESC LIMIT 1)
+     LEFT JOIN comercio c ON c.id = r.comercio_id
+     WHERE p.nombre_normalizado LIKE ?
+     ORDER BY (p.nombre_normalizado LIKE ?) DESC, (r.id IS NULL), p.nombre COLLATE NOCASE
+     LIMIT ?`,
+    `%${clave}%`,
+    `${clave}%`,
+    limite,
+  );
+}
+
+// ───────────── Créditos ─────────────
+
+export interface Credito {
+  id: number;
+  lista_id: number;
+  comercio_id: number | null;
+  comercio_nombre: string | null;
+  fecha: string;
+  vence: string | null;
+  pagada_en: string | null;
+  total_usd: number;
+  total_bs: number;
+  tasa_bs: number | null;
+  foto_uri: string | null;
+  abonado_usd: number;
+  saldo_usd: number;
+  productos: string | null;
+}
+
+const SELECT_CREDITOS = `
+  SELECT f.id, f.lista_id, f.comercio_id, c.nombre AS comercio_nombre, f.fecha, f.vence, f.pagada_en,
+    COALESCE(f.total_usd, 0) AS total_usd, f.total_bs, f.tasa_bs, f.foto_uri,
+    COALESCE((SELECT SUM(monto_usd) FROM abono a WHERE a.factura_id = f.id), 0) AS abonado_usd,
+    COALESCE(f.total_usd, 0) - COALESCE((SELECT SUM(monto_usd) FROM abono a WHERE a.factura_id = f.id), 0) AS saldo_usd,
+    (SELECT GROUP_CONCAT(p.nombre, ', ') FROM item_compra i JOIN producto p ON p.id = i.producto_id
+      WHERE i.factura_id = f.id) AS productos
+  FROM factura f LEFT JOIN comercio c ON c.id = f.comercio_id
+  WHERE f.metodo_pago = 'Crédito'`;
+
+export async function listarCreditos(pendientes: boolean): Promise<Credito[]> {
+  const db = await getDb();
+  return db.getAllAsync<Credito>(
+    pendientes
+      ? `${SELECT_CREDITOS} AND f.pagada_en IS NULL ORDER BY COALESCE(f.vence, '9999'), f.fecha`
+      : `${SELECT_CREDITOS} AND f.pagada_en IS NOT NULL ORDER BY f.pagada_en DESC LIMIT 100`,
+  );
+}
+
+export interface Abono {
+  id: number;
+  factura_id: number;
+  monto_usd: number;
+  fecha: string;
+  nota: string | null;
+}
+
+export async function listarAbonos(facturaId: number): Promise<Abono[]> {
+  const db = await getDb();
+  return db.getAllAsync<Abono>('SELECT * FROM abono WHERE factura_id = ? ORDER BY fecha, id', facturaId);
+}
+
+/** Marca la factura como pagada cuando los abonos cubren el total (o la reabre si no). */
+async function actualizarEstadoCredito(facturaId: number) {
+  const db = await getDb();
+  const f = await db.getFirstAsync<{ metodo_pago: string | null; total_usd: number | null; abonado: number; pagada_en: string | null }>(
+    `SELECT metodo_pago, total_usd, pagada_en,
+       COALESCE((SELECT SUM(monto_usd) FROM abono WHERE factura_id = factura.id), 0) AS abonado
+     FROM factura WHERE id = ?`,
+    facturaId,
+  );
+  if (!f) return;
+  const saldada = f.metodo_pago === 'Crédito' && (f.total_usd ?? 0) > 0 && f.abonado >= (f.total_usd ?? 0) - 0.005;
+  if (saldada && !f.pagada_en) await db.runAsync('UPDATE factura SET pagada_en = ? WHERE id = ?', ahora(), facturaId);
+  if (!saldada && f.pagada_en) await db.runAsync('UPDATE factura SET pagada_en = NULL WHERE id = ?', facturaId);
+}
+
+export async function registrarAbono(facturaId: number, montoUsd: number, nota: string | null) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      'INSERT INTO abono (factura_id, monto_usd, fecha, nota) VALUES (?, ?, ?, ?)',
+      facturaId,
+      montoUsd,
+      ahora(),
+      nota?.trim() || null,
+    );
+    await actualizarEstadoCredito(facturaId);
+  });
+}
+
+export async function eliminarAbono(abonoId: number) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    const a = await db.getFirstAsync<{ factura_id: number }>('SELECT factura_id FROM abono WHERE id = ?', abonoId);
+    await db.runAsync('DELETE FROM abono WHERE id = ?', abonoId);
+    if (a) await actualizarEstadoCredito(a.factura_id);
+  });
+}
+
+// ───────────── Listas frecuentes ─────────────
+
+export interface Plantilla {
+  id: number;
+  nombre: string;
+  texto: string;
+  creada: string;
+}
+
+export async function listarPlantillas(): Promise<Plantilla[]> {
+  const db = await getDb();
+  return db.getAllAsync<Plantilla>('SELECT * FROM plantilla ORDER BY nombre COLLATE NOCASE');
+}
+
+export async function guardarPlantilla(nombre: string, texto: string) {
+  const db = await getDb();
+  await db.runAsync('INSERT INTO plantilla (nombre, texto, creada) VALUES (?, ?, ?)', nombre.trim(), texto, ahora());
+}
+
+export async function eliminarPlantilla(id: number) {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM plantilla WHERE id = ?', id);
+}
+
+// ───────────── Reporte ─────────────
+
+export interface FilaReporte {
+  factura_id: number;
+  fecha: string;
+  comercio: string | null;
+  metodo_pago: string | null;
+  tasa_bs: number | null;
+  producto: string;
+  cantidad: number | null;
+  unidad: string | null;
+  total_usd: number | null;
+  total_bs: number | null;
+}
+
+export interface NoHabiaReporte {
+  fecha: string;
+  producto: string;
+  cantidad: number | null;
+  unidad: string | null;
+}
+
+export interface AbonoReporte extends Abono {
+  comercio: string | null;
+}
+
+export interface DatosReporte {
+  compras: FilaReporte[];
+  noHabia: NoHabiaReporte[];
+  abonos: AbonoReporte[];
+  creditosPendientes: Credito[];
+}
+
+/** Todo lo comprado entre dos fechas ISO (desde incluida, hasta excluida). */
+export async function datosReporte(desde: string, hasta: string): Promise<DatosReporte> {
+  const db = await getDb();
+  const [compras, noHabia, abonos, creditosPendientes] = await Promise.all([
+    db.getAllAsync<FilaReporte>(
+      `SELECT f.id AS factura_id, f.fecha, c.nombre AS comercio, f.metodo_pago, f.tasa_bs, p.nombre AS producto,
+         i.cantidad_comprada AS cantidad, i.unidad, i.precio_pagado_usd AS total_usd, i.precio_pagado_bs AS total_bs
+       FROM item_compra i
+       JOIN factura f ON f.id = i.factura_id
+       JOIN producto p ON p.id = i.producto_id
+       LEFT JOIN comercio c ON c.id = f.comercio_id
+       WHERE i.comprado = 1 AND f.fecha >= ? AND f.fecha < ?
+       ORDER BY f.fecha, f.id, i.orden`,
+      desde,
+      hasta,
+    ),
+    db.getAllAsync<NoHabiaReporte>(
+      `SELECT l.fecha, p.nombre AS producto, i.cantidad_pedida AS cantidad, i.unidad
+       FROM item_compra i JOIN lista_compra l ON l.id = i.lista_id JOIN producto p ON p.id = i.producto_id
+       WHERE i.no_disponible = 1 AND l.fecha >= ? AND l.fecha < ?
+       ORDER BY l.fecha`,
+      desde,
+      hasta,
+    ),
+    db.getAllAsync<AbonoReporte>(
+      `SELECT a.*, c.nombre AS comercio FROM abono a
+       JOIN factura f ON f.id = a.factura_id LEFT JOIN comercio c ON c.id = f.comercio_id
+       WHERE a.fecha >= ? AND a.fecha < ? ORDER BY a.fecha`,
+      desde,
+      hasta,
+    ),
+    listarCreditos(true),
+  ]);
+  return { compras, noHabia, abonos, creditosPendientes };
 }

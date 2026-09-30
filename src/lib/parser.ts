@@ -5,6 +5,8 @@ export interface ItemParseado {
   cantidad: number | null;
   unidad: string | null;
   original: string;
+  /** Nota opcional (se agrega al editar antes de crear la lista). */
+  nota?: string | null;
 }
 
 // Alias escritos → nombre canónico de la unidad.
@@ -33,6 +35,10 @@ const UNIDADES: Record<string, string> = {
   pieza: 'Pieza', piezas: 'Pieza', pz: 'Pieza', pzas: 'Pieza',
   manojo: 'Manojo', manojos: 'Manojo',
 };
+
+/** Unidades que se ofrecen para elegir, de más a menos usadas en compras de negocio. */
+export const UNIDADES_COMUNES = ['Kg', 'Unidad', 'Caja', 'Bulto', 'Paquete', 'Saco', 'L', 'Docena', 'Cartón', 'g', 'Fardo', 'Bolsa',
+  'Lata', 'Botella', 'Galón', 'Pote', 'Frasco', 'Bandeja', 'Rollo', 'Pieza', 'Manojo', 'Sobre', 'ml'];
 
 const NUMEROS_ESCRITOS: Record<string, number> = {
   medio: 0.5, media: 0.5, un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,

@@ -32,6 +32,7 @@ export default function DetalleCompra() {
 
   const comprados = items.filter((i) => i.comprado);
   const noComprados = items.filter((i) => !i.comprado);
+  const creditoUsd = facturas.filter((f) => f.metodo_pago === 'Crédito').reduce((t, f) => t + (f.total_usd ?? 0), 0);
   const porMetodo = agrupar(facturas, (f) => f.metodo_pago);
   const porComercio = agrupar(facturas, (f) => f.comercio_nombre);
 
@@ -58,6 +59,7 @@ export default function DetalleCompra() {
           <Text style={s.totalEtiqueta}>Total pagado</Text>
           <Text style={s.totalMonto}>{formatBs(lista.total_gastado_bs)}</Text>
           {lista.total_gastado_usd ? <Text style={s.totalUsd}>{formatUsd(lista.total_gastado_usd)}</Text> : null}
+          {creditoUsd > 0 ? <Text style={s.totalUsd}>+ {formatUsd(creditoUsd)} a crédito</Text> : null}
           <Text style={s.totalEtiqueta}>
             {comprados.length} de {items.length} productos · {facturas.length} {facturas.length === 1 ? 'factura' : 'facturas'}
           </Text>
@@ -111,6 +113,7 @@ export default function DetalleCompra() {
             {noComprados.map((i) => (
               <Text key={i.id} style={[s.nombre, { color: colores.textoSuave, paddingVertical: 4 }]}>
                 {i.producto_nombre}
+                {i.no_disponible ? <Text style={{ color: colores.peligro, fontWeight: '700' }}> · no había</Text> : null}
               </Text>
             ))}
           </View>

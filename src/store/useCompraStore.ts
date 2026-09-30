@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as repo from '../db/repo';
-import type { Comercio, DatosFactura, Factura, Item, Lista, MetodoPago, ReferenciaPrecio } from '../db/repo';
+import type { CambiosItem, Comercio, DatosFactura, Factura, Item, Lista, MetodoPago, ReferenciaPrecio } from '../db/repo';
 import type { Moneda } from '../lib/format';
 import type { ItemParseado } from '../lib/parser';
 import { obtenerTasa, type TipoTasa } from '../lib/tasa';
@@ -25,6 +25,8 @@ interface CompraState {
   actualizandoTasa: boolean;
   /** true si el último intento automático falló (sin conexión, servicio caído). */
   tasaSinConexion: boolean;
+  /** Fecha del último respaldo exportado (para recordar hacer uno cada semana). */
+  ultimoRespaldo: string | null;
   /** Moneda en la que se escriben los precios por defecto. */
   moneda: Moneda;
 
@@ -42,6 +44,9 @@ interface CompraState {
   eliminarFactura: (facturaId: number) => Promise<void>;
   deshacer: (itemId: number) => Promise<void>;
   eliminarItems: (itemIds: number[]) => Promise<void>;
+  editarItem: (itemId: number, cambios: CambiosItem) => Promise<void>;
+  marcarNoHabia: (itemIds: number[], valor: boolean) => Promise<void>;
+  agregarTexto: (items: ItemParseado[]) => Promise<void>;
   cerrar: (moverPendientes: boolean) => Promise<void>;
 }
 
@@ -62,6 +67,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
   tasaTipo: 'oficial',
   actualizandoTasa: false,
   tasaSinConexion: false,
+  ultimoRespaldo: null,
   moneda: 'USD',
 
   iniciar: async () => {
@@ -76,7 +82,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
 
   recargar: async () => {
     const lista = await repo.getListaActiva();
-    const [items, facturas, referencias, ultimoComercio, ultimoMetodo, tasa, tasaFecha, moneda, origen, fuente, tipo] = await Promise.all([
+    const [items, facturas, referencias, ultimoComercio, ultimoMetodo, tasa, tasaFecha, moneda, origen, fuente, tipo, ultimoRespaldo] = await Promise.all([
       lista ? repo.getItems(lista.id) : Promise.resolve([]),
       lista ? repo.getFacturas(lista.id) : Promise.resolve([]),
       lista ? repo.referenciasDeLista(lista.id) : Promise.resolve(new Map<number, ReferenciaPrecio>()),
@@ -88,6 +94,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       repo.getAjuste('tasa_origen'),
       repo.getAjuste('tasa_fuente'),
       repo.getAjuste('tasa_tipo'),
+      repo.getAjuste('ultimo_respaldo'),
     ]);
     set({
       lista,
@@ -95,13 +102,15 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       facturas,
       referencias,
       ultimoComercioId: ultimoComercio ? Number(ultimoComercio) : null,
-      ultimoMetodo: ultimoMetodo === 'Pago Móvil' ? 'Pago Móvil' : 'Tarjeta',
+      // El crédito no se propone por defecto: se elige a propósito en cada factura.
+      ultimoMetodo: ultimoMetodo === 'Pago Móvil' || ultimoMetodo === 'Efectivo' ? ultimoMetodo : 'Tarjeta',
       tasaBs: tasa ? Number(tasa) : null,
       tasaFecha,
       moneda: moneda === 'BS' ? 'BS' : 'USD',
       tasaOrigen: origen === 'auto' || origen === 'manual' ? origen : null,
       tasaFuente: fuente,
       tasaTipo: tipo === 'paralelo' ? 'paralelo' : 'oficial',
+      ultimoRespaldo,
     });
   },
 
@@ -174,6 +183,23 @@ export const useCompraStore = create<CompraState>((set, get) => ({
     await get().recargar();
   },
 
+  editarItem: async (itemId, cambios) => {
+    await repo.actualizarItem(itemId, cambios);
+    await get().recargar();
+  },
+
+  marcarNoHabia: async (itemIds, valor) => {
+    await repo.marcarNoDisponible(itemIds, valor);
+    await get().recargar();
+  },
+
+  agregarTexto: async (items) => {
+    const lista = get().lista;
+    if (lista) await repo.agregarItems(lista.id, items);
+    else await repo.importarItems(items, 'nueva');
+    await get().recargar();
+  },
+
   eliminarItems: async (itemIds) => {
     await repo.eliminarItems(itemIds);
     await get().recargar();
@@ -198,13 +224,19 @@ async function guardarTasa(tasa: number, fecha: string, origen: 'auto' | 'manual
   await repo.setAjuste('tasa_fuente', fuente);
 }
 
-export function totalGastado(items: Item[]): { bs: number; usd: number } {
+/** Totales de lo comprado: pagado en el momento (Bs y $) y lo que quedó a crédito ($). */
+export function totalGastado(items: Item[]): { bs: number; usd: number; creditoUsd: number } {
   let bs = 0;
   let usd = 0;
+  let creditoUsd = 0;
   for (const i of items) {
     if (!i.comprado) continue;
+    if (i.metodo_pago === 'Crédito') {
+      creditoUsd += i.precio_pagado_usd ?? 0;
+      continue;
+    }
     bs += i.precio_pagado_bs ?? 0;
     usd += i.precio_pagado_usd ?? 0;
   }
-  return { bs, usd };
+  return { bs, usd, creditoUsd };
 }

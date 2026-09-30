@@ -10,13 +10,13 @@ precios para saber dónde conviene comprar cada cosa. Los precios se anotan en d
 
 | Pantalla | Qué hace |
 | --- | --- |
-| **Compra** | Lista activa con *Pendientes* / *Comprados*, progreso (8/15), total pagado en Bs. y en $, y la **tasa del día** (Bs por $), que se descarga sola: BCV oficial o paralelo, una vez al día al abrir la app (con botón para actualizar y opción de escribirla a mano; sin conexión se usa la última guardada). Bajo cada pendiente: último precio pagado (y su equivalente en Bs. a la tasa de hoy) y el comercio más barato conocido. Mantén presionado para **elegir varios productos y registrarlos en una misma factura**. |
-| **Factura** | Hoja inferior para registrar uno o varios productos juntos: cantidad (con +/−) vs. pedida, precio por unidad o total en **$ o Bs.**, tasa, comercio, **Tarjeta / Pago Móvil** y foto del ticket. Se pueden sumar más productos pendientes a la misma factura. En *Comprados* se ven agrupados por factura; tocar una la abre para editarla. |
-| **Pegar lista** | Pega el mensaje de WhatsApp (se toma del portapapeles automáticamente). Entiende viñetas, emojis, `*negritas*`, prefijos de chat exportado y cantidades como `2 kg de harina`, `Harina x3`, `Queso 1/2 kilo`, `3 cajas de leche`. Puedes descartar líneas antes de crear la lista. |
-| **Precios** | Buscador de productos con los comercios ordenados del más barato al más caro (en $, con su equivalente en Bs. hoy). |
-| **Ficha de producto** | Cuánto has gastado en total, precio promedio, mínimo y máximo, **cuánto ahorraste o pagaste de más en cada comercio** (frente a tu precio promedio), cuánto te habrías ahorrado comprando siempre en el más barato, y cada compra con su variación (▲/▼ %) frente a la anterior en el mismo comercio. |
-| **Historial** | Compras cerradas por fecha con total en Bs. y $, gasto del mes y detalle por factura: desglose por método de pago y por comercio, y los tickets fotografiados. |
-| **Comercios** | Alta, edición y baja de comercios (Mayorista / Supermercado / Otro). |
+| **Compra** | Lista activa con *Pendientes* / *Comprados*, progreso, total pagado en Bs. y $ (y lo que va a crédito aparte) y la **tasa del día** automática (BCV o paralelo). Cada producto tiene ✏️ para **editar nombre, cantidad, unidad (Kg, Unidad, Caja, Bulto…) y nota**; si no trae unidad muestra «Elegir unidad» y la app la recuerda para la próxima vez. Mantén presionado para elegir varios y registrarlos en **una factura**, marcarlos como **«No había»** o eliminarlos. Vista **por comercio** (dónde estuvo más barato cada cosa). Campo para agregar productos con **autocompletado**. Menú ⋮: **enviar resumen por WhatsApp**, guardar como **lista frecuente**, cerrar compra. |
+| **Factura** | Uno o varios productos: cantidad, precio por unidad o total en **$ o Bs.**, tasa, comercio, método **Tarjeta / Pago Móvil / Efectivo / Crédito** (con vencimiento), foto del ticket. **Alerta** si el precio subió 15 % o más frente a la última vez. |
+| **Pegar lista** | Pega el mensaje (o en WhatsApp: mantener presionado → **Compartir → Compras**). Cada línea se puede **corregir** antes de crear la lista. Acceso a las **listas frecuentes**. |
+| **Precios** | Comercios ordenados del más barato al más caro por producto, con ficha de ahorro por comercio. |
+| **Por pagar** | Deudas a crédito (en $) que paga el negocio, agrupadas por comercio, con vencidas resaltadas, **abonos o pago total** y envío por WhatsApp. |
+| **Historial** | Compras cerradas con lo pagado y lo que fue a crédito, detalle por factura y lo que no había. |
+| **Más** | **Reporte semanal en Excel** (Resumen, Compras, Productos, Créditos, No había), **respaldo** y restauración de datos (con recordatorio semanal), comercios. |
 
 Los cálculos de ahorro se hacen en dólares para que la inflación del bolívar no distorsione la comparación.
 
@@ -39,7 +39,7 @@ src/
     producto/[id].tsx  ficha de producto con ahorro por comercio
   components/          UI compartida y hoja de registro
   db/                  esquema SQLite y consultas
-  lib/                 parser de WhatsApp, formato Bs./$, cálculo de ahorro, fotos
+  lib/                 parser de WhatsApp, formato Bs./$, ahorro, resúmenes, Excel (xlsx.ts), tasa, fotos
   store/               estado (Zustand)
 ```
 
@@ -84,4 +84,5 @@ También se puede compilar con EAS: `npx eas-cli@latest login` y `npm run build:
 - [x] Fase 4 – Historial automático de precios y radar por comercio.
 - [x] Extra – Facturas con varios productos, precios en $ con tasa de cambio y ahorro por comercio.
 - [x] Fase 5 – Compilación del APK (GitHub Actions → Releases).
+- [x] Extra 2 – Edición de lista y unidades, crédito y cuentas por pagar, efectivo, no había, resumen por WhatsApp, listas frecuentes, alerta de precio, vista por comercio, autocompletado, respaldo y reporte semanal en Excel.
 - [ ] Pruebas en dispositivo real.

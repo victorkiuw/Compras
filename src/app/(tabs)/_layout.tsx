@@ -22,8 +22,9 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: 'Compra', headerShown: false, tabBarIcon: icono('cart-outline') }} />
       <Tabs.Screen name="radar" options={{ title: 'Precios', headerTitle: 'Radar de precios', tabBarIcon: icono('pricetags-outline') }} />
+      <Tabs.Screen name="porpagar" options={{ title: 'Por pagar', headerTitle: 'Créditos por pagar', tabBarIcon: icono('time-outline') }} />
       <Tabs.Screen name="historial" options={{ title: 'Historial', headerTitle: 'Viajes de compra', tabBarIcon: icono('calendar-outline') }} />
-      <Tabs.Screen name="comercios" options={{ title: 'Comercios', tabBarIcon: icono('storefront-outline') }} />
+      <Tabs.Screen name="mas" options={{ title: 'Más', tabBarIcon: icono('menu-outline') }} />
     </Tabs>
   );
 }

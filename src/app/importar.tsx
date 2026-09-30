@@ -1,41 +1,74 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import * as Sharing from 'expo-sharing';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Boton, colores, estilos, Icono } from '../components/ui';
+import { EditorProducto } from '../components/EditorProducto';
+import { Boton, Chip, colores, estilos, Icono } from '../components/ui';
+import * as repo from '../db/repo';
+import type { Plantilla } from '../db/repo';
 import { formatCantidad } from '../lib/format';
-import { parseLista } from '../lib/parser';
+import { parseLista, type ItemParseado } from '../lib/parser';
 import { useCompraStore } from '../store/useCompraStore';
+
+/** Texto que llegó con "Compartir → Compras" desde WhatsApp u otra app (se consume una vez). */
+function textoCompartido(): string {
+  try {
+    const texto = Sharing.getSharedPayloads()
+      .filter((p) => p.shareType === 'text' || p.shareType === 'url')
+      .map((p) => p.value)
+      .join('\n')
+      .trim();
+    if (texto) Sharing.clearSharedPayloads();
+    return texto;
+  } catch {
+    return '';
+  }
+}
+
+const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
 export default function Importar() {
   const insets = useSafeAreaInsets();
   const { lista, items, importar } = useCompraStore();
-  const [texto, setTextoCrudo] = useState('');
+  const [compartido] = useState(textoCompartido);
+  const [texto, setTextoCrudo] = useState(compartido);
   const [descartados, setDescartados] = useState<Set<number>>(new Set());
+  const [ediciones, setEdiciones] = useState<Map<number, ItemParseado>>(new Map());
+  const [editando, setEditando] = useState<number | null>(null);
+  const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
   const [guardando, setGuardando] = useState(false);
 
-  // Al cambiar el texto se reinician los descartes (los índices ya no corresponden).
+  // Al cambiar el texto se reinician descartes y ediciones (los índices ya no corresponden).
   const setTexto = (valor: string | ((actual: string) => string)) => {
     setTextoCrudo(valor);
     setDescartados(new Set());
+    setEdiciones(new Map());
   };
 
   const parseados = useMemo(() => parseLista(texto), [texto]);
-  const seleccionados = parseados.filter((_, i) => !descartados.has(i));
+  const finales = parseados.map((p, i) => ediciones.get(i) ?? p);
+  const seleccionados = finales.filter((_, i) => !descartados.has(i));
 
+  useFocusEffect(
+    useCallback(() => {
+      repo.listarPlantillas().then(setPlantillas);
+    }, []),
+  );
 
-  // Si el portapapeles tiene texto al abrir, se pega automáticamente.
+  // Si no llegó nada compartido y el portapapeles tiene texto, se pega automáticamente.
   useEffect(() => {
+    if (compartido) return;
     Clipboard.hasStringAsync()
       .then(async (hay) => {
         if (!hay) return;
         const contenido = await Clipboard.getStringAsync();
-        if (contenido.trim()) setTexto((actual) => actual || contenido);
+        if (contenido.trim()) setTextoCrudo((actual) => actual || contenido);
       })
       .catch(() => {});
-  }, []);
+  }, [compartido]);
 
   const pegar = async () => {
     const contenido = await Clipboard.getStringAsync();
@@ -51,12 +84,25 @@ export default function Importar() {
       return sig;
     });
 
+  const borrarPlantilla = (p: Plantilla) =>
+    Alert.alert('Lista frecuente', `¿Eliminar «${p.nombre}»?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          await repo.eliminarPlantilla(p.id);
+          setPlantillas(await repo.listarPlantillas());
+        },
+      },
+    ]);
+
   const crear = async (modo: 'nueva' | 'agregar') => {
     setGuardando(true);
     try {
       await importar(seleccionados, modo);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.back();
+      volver();
     } catch (e) {
       setGuardando(false);
       Alert.alert('No se pudo importar', e instanceof Error ? e.message : String(e));
@@ -73,9 +119,37 @@ export default function Importar() {
     ]);
   };
 
+  const enEdicion = editando != null ? finales[editando] : null;
+
   return (
     <View style={{ flex: 1, backgroundColor: colores.fondo }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} keyboardShouldPersistTaps="handled">
+        {compartido ? (
+          <View style={s.aviso}>
+            <Icono name="logo-whatsapp" size={18} color={colores.primario} />
+            <Text style={s.avisoTexto}>Lista recibida desde otra app. Revísala y crea la lista.</Text>
+          </View>
+        ) : null}
+
+        {plantillas.length > 0 && !texto && (
+          <View style={{ gap: 6 }}>
+            <Text style={estilos.etiqueta}>Listas frecuentes</Text>
+            <View style={s.chips}>
+              {plantillas.map((p) => (
+                <Chip
+                  key={p.id}
+                  texto={p.nombre}
+                  icono="bookmark-outline"
+                  activo={false}
+                  onPress={() => setTexto(p.texto)}
+                  onLongPress={() => borrarPlantilla(p)}
+                />
+              ))}
+            </View>
+            <Text style={s.ayuda}>Mantén presionada una lista para eliminarla.</Text>
+          </View>
+        )}
+
         <View style={s.fila}>
           <Text style={[estilos.etiqueta, { flex: 1 }]}>Mensaje de WhatsApp</Text>
           <Boton titulo="Pegar" variante="secundario" icono="clipboard-outline" onPress={pegar} style={{ minHeight: 40 }} />
@@ -90,24 +164,36 @@ export default function Importar() {
           placeholderTextColor={colores.textoSuave}
           textAlignVertical="top"
         />
+        <Text style={s.ayuda}>Consejo: en WhatsApp mantén presionado el mensaje → Compartir → Compras, y llega directo aquí.</Text>
 
         {parseados.length > 0 && (
           <View style={{ gap: 8 }}>
             <Text style={estilos.etiqueta}>
-              {seleccionados.length} de {parseados.length} productos · toca para descartar
+              {seleccionados.length} de {parseados.length} productos · toca para corregir
             </Text>
-            {parseados.map((p, i) => {
+            {finales.map((p, i) => {
               const fuera = descartados.has(i);
               return (
-                <Pressable key={`${i}-${p.original}`} onPress={() => alternar(i)} style={[estilos.tarjeta, s.item, fuera && { opacity: 0.4 }]}>
-                  <Icono name={fuera ? 'close-circle-outline' : 'checkbox-outline'} color={fuera ? colores.textoSuave : colores.primario} />
-                  <Text style={[s.nombre, fuera && { textDecorationLine: 'line-through' }]}>{p.nombre}</Text>
-                  {p.cantidad != null && (
+                <Pressable
+                  key={`${i}-${p.original}`}
+                  onPress={() => (fuera ? alternar(i) : setEditando(i))}
+                  style={[estilos.tarjeta, s.item, fuera && { opacity: 0.4 }]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.nombre, fuera && { textDecorationLine: 'line-through' }]}>{p.nombre}</Text>
+                    {p.nota ? <Text style={s.nota}>📝 {p.nota}</Text> : null}
+                  </View>
+                  {p.cantidad != null || p.unidad ? (
                     <Text style={s.cantidad}>
-                      {formatCantidad(p.cantidad)}
+                      {p.cantidad != null ? formatCantidad(p.cantidad) : ''}
                       {p.unidad ? ` ${p.unidad}` : ''}
                     </Text>
+                  ) : (
+                    <Text style={s.sinUnidad}>sin unidad</Text>
                   )}
+                  <Pressable onPress={() => alternar(i)} hitSlop={10} accessibilityLabel={fuera ? 'Volver a incluir' : 'Descartar'}>
+                    <Icono name={fuera ? 'add-circle-outline' : 'close-circle-outline'} color={fuera ? colores.primario : colores.textoSuave} />
+                  </Pressable>
                 </Pressable>
               );
             })}
@@ -123,16 +209,34 @@ export default function Importar() {
           deshabilitado={!seleccionados.length || guardando}
         />
       </View>
+
+      {enEdicion && editando != null && (
+        <EditorProducto
+          titulo="Corregir producto"
+          inicial={{ nombre: enEdicion.nombre, cantidad: enEdicion.cantidad, unidad: enEdicion.unidad, nota: enEdicion.nota ?? null }}
+          onGuardar={(c) => {
+            setEdiciones((prev) => new Map(prev).set(editando, { ...enEdicion, ...c }));
+            setEditando(null);
+          }}
+          onCerrar={() => setEditando(null)}
+        />
+      )}
     </View>
   );
 }
 
 const s = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  area: { minHeight: 160, maxHeight: 260, fontSize: 16, paddingTop: 12, paddingBottom: 12 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  area: { minHeight: 140, maxHeight: 240, fontSize: 16, paddingTop: 12, paddingBottom: 12 },
+  ayuda: { fontSize: 13, color: colores.textoSuave },
+  aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10, backgroundColor: colores.primarioSuave },
+  avisoTexto: { flex: 1, fontSize: 14, fontWeight: '600', color: colores.primario },
   item: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  nombre: { flex: 1, fontSize: 16, color: colores.texto, fontWeight: '500' },
+  nombre: { fontSize: 16, color: colores.texto, fontWeight: '500' },
+  nota: { fontSize: 13, color: colores.textoSuave, fontStyle: 'italic' },
   cantidad: { fontSize: 15, fontWeight: '700', color: colores.texto },
+  sinUnidad: { fontSize: 13, color: colores.aviso, fontWeight: '600' },
   pie: {
     paddingHorizontal: 16,
     paddingTop: 12,

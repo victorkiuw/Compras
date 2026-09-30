@@ -30,7 +30,7 @@ export default function Historial() {
       ListHeaderComponent={
         listas.length ? (
           <View style={[estilos.tarjeta, s.resumen]}>
-            <Text style={s.resumenEtiqueta}>Gastado este mes</Text>
+            <Text style={s.resumenEtiqueta}>Pagado este mes</Text>
             <Text style={s.resumenTotal}>{formatBs(gastoMes)}</Text>
             {gastoMesUsd > 0 && <Text style={s.resumenUsd}>{formatUsd(gastoMesUsd)}</Text>}
           </View>
@@ -51,6 +51,7 @@ export default function Historial() {
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={s.total}>{formatBs(item.total_gastado_bs)}</Text>
             {item.total_gastado_usd ? <Text style={s.meta}>{formatUsd(item.total_gastado_usd)}</Text> : null}
+            {item.credito_usd > 0 ? <Text style={s.credito}>+ {formatUsd(item.credito_usd)} crédito</Text> : null}
           </View>
           <Icono name="chevron-forward" color={colores.textoSuave} size={20} />
         </Pressable>
@@ -71,4 +72,5 @@ const s = StyleSheet.create({
   fecha: { fontSize: 16, fontWeight: '700', color: colores.texto, textTransform: 'capitalize' },
   meta: { fontSize: 14, color: colores.textoSuave },
   total: { fontSize: 17, fontWeight: '700', color: colores.primario },
+  credito: { fontSize: 13, fontWeight: '700', color: colores.aviso },
 });

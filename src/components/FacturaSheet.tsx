@@ -15,8 +15,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as repo from '../db/repo';
-import type { Item, MetodoPago } from '../db/repo';
-import { convertir, formatBs, formatCantidad, formatNumero, formatUsd, haceCuanto, parseMonto, type Moneda } from '../lib/format';
+import { METODOS_PAGO, type Item, type MetodoPago } from '../db/repo';
+import { convertir, formatBs, formatCantidad, formatFecha, formatNumero, formatUsd, haceCuanto, parseMonto, type Moneda } from '../lib/format';
 import { obtenerFotoFactura } from '../lib/fotos';
 import { formatPrecioRef } from '../lib/precios';
 import { useCompraStore } from '../store/useCompraStore';
@@ -30,6 +30,22 @@ export interface AperturaFactura {
 }
 
 type ModoPrecio = 'unitario' | 'total';
+
+/** Desde este % de subida frente a la última compra se muestra la alerta de precio. */
+const UMBRAL_ALERTA = 15;
+
+const ICONO_METODO: Record<MetodoPago, Parameters<typeof Icono>[0]['name']> = {
+  Tarjeta: 'card-outline',
+  'Pago Móvil': 'phone-portrait-outline',
+  Efectivo: 'cash-outline',
+  Crédito: 'time-outline',
+};
+
+function sumarDias(dias: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  return d.toISOString();
+}
 
 interface Linea {
   itemId: number;
@@ -55,6 +71,7 @@ interface EstadoInicial {
   comercioId: number | null;
   metodo: MetodoPago;
   foto: string | null;
+  vence: string | null;
 }
 
 function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompraStore.getState>): EstadoInicial {
@@ -75,6 +92,7 @@ function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompr
       comercioId: factura.comercio_id,
       metodo: factura.metodo_pago ?? st.ultimoMetodo,
       foto: factura.foto_uri,
+      vence: factura.vence,
     };
   }
   return {
@@ -86,6 +104,7 @@ function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompr
       st.ultimoComercioId && comercios.some((c) => c.id === st.ultimoComercioId) ? st.ultimoComercioId : comercios[0]?.id ?? null,
     metodo: st.ultimoMetodo,
     foto: null,
+    vence: null,
   };
 }
 
@@ -103,6 +122,7 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const [comercioId, setComercioId] = useState<number | null>(inicial.comercioId);
   const [metodo, setMetodo] = useState<MetodoPago>(inicial.metodo);
   const [foto, setFoto] = useState<string | null>(inicial.foto);
+  const [vence, setVence] = useState<string | null>(inicial.vence);
   const [nuevoComercio, setNuevoComercio] = useState<string | null>(null);
   const [mostrarPendientes, setMostrarPendientes] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -197,6 +217,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const guardar = async () => {
     if (!apertura || !lineas.length) return;
     if (moneda === 'USD' && !tasa) return Alert.alert('Falta la tasa', 'Indica la tasa (Bs por $) para saber cuánto pagas en bolívares.');
+    if (metodo === 'Crédito' && !tasa)
+      return Alert.alert('Falta la tasa', 'Las deudas a crédito se llevan en dólares: indica la tasa para convertir.');
     for (const l of lineas) {
       const c = calcular(l);
       const nombre = itemDe(l.itemId)?.producto_nombre ?? '';
@@ -211,6 +233,7 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
         metodo,
         tasaBs: tasa,
         fotoUri: foto,
+        vence,
         lineas: lineas.map((l) => {
           const c = calcular(l);
           return { itemId: l.itemId, cantidad: c.cantidad, totalBs: c.bs ?? 0, totalUsd: c.usd };
@@ -373,6 +396,15 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
                       {c.cantidad < item.cantidad_pedida ? 'Menos' : 'Más'} de lo pedido
                     </Text>
                   )}
+                  {ref && dif != null && dif >= UMBRAL_ALERTA && (
+                    <View style={s.alerta}>
+                      <Icono name="warning" size={18} color={colores.peligro} />
+                      <Text style={s.alertaTexto}>
+                        Subió {formatNumero(dif, 0)}% desde la última vez
+                        {ref.masBarato ? `. En ${ref.masBarato.comercio_nombre} estaba a ${formatPrecioRef(ref.masBarato)}` : ''}
+                      </Text>
+                    </View>
+                  )}
                   {ref && (
                     <Pressable onPress={() => usarPrecioAnterior(l, item)} style={s.referencia}>
                       <Icono name="time-outline" size={16} color={colores.acento} />
@@ -445,14 +477,28 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
             {/* Método de pago */}
             <View style={{ gap: 6 }}>
               <Text style={estilos.etiqueta}>Método de pago</Text>
-              <Segmentado
-                opciones={[
-                  { valor: 'Tarjeta', etiqueta: 'Tarjeta', icono: 'card-outline' },
-                  { valor: 'Pago Móvil', etiqueta: 'Pago Móvil', icono: 'phone-portrait-outline' },
-                ]}
-                valor={metodo}
-                onCambio={setMetodo}
-              />
+              <View style={s.chips}>
+                {METODOS_PAGO.map((m) => (
+                  <Chip key={m} texto={m} icono={ICONO_METODO[m]} activo={metodo === m} onPress={() => setMetodo(m)} />
+                ))}
+              </View>
+              {metodo === 'Crédito' && (
+                <View style={[s.credito, { gap: 8 }]}>
+                  <Text style={s.creditoTexto}>
+                    Queda como deuda de {formatUsd(totales.usd)} con {comercios.find((c) => c.id === comercioId)?.nombre ?? 'el comercio'}. La
+                    paga el negocio; aparecerá en «Por pagar».
+                  </Text>
+                  <Text style={estilos.etiqueta}>Vence</Text>
+                  <View style={s.chips}>
+                    <Chip texto="Sin fecha" activo={vence == null} onPress={() => setVence(null)} />
+                    {[7, 15, 30].map((d) => {
+                      const f = sumarDias(d);
+                      return <Chip key={d} texto={`${d} días`} activo={vence?.slice(0, 10) === f.slice(0, 10)} onPress={() => setVence(f)} />;
+                    })}
+                  </View>
+                  {vence && <Text style={s.nota}>Vence el {formatFecha(vence)}</Text>}
+                </View>
+              )}
             </View>
 
             {/* Foto del ticket */}
@@ -545,6 +591,17 @@ const s = StyleSheet.create({
   inputPrecio: { flex: 1, fontSize: 20, fontWeight: '700', color: colores.texto, paddingVertical: 8 },
   calculo: { fontSize: 14, color: colores.texto, fontWeight: '600' },
   nota: { fontSize: 14, color: colores.textoSuave },
+  credito: { padding: 12, borderRadius: 12, backgroundColor: colores.avisoSuave },
+  creditoTexto: { fontSize: 14, color: colores.texto, lineHeight: 20 },
+  alerta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colores.peligroSuave,
+    padding: 8,
+    borderRadius: 10,
+  },
+  alertaTexto: { flex: 1, fontSize: 14, fontWeight: '600', color: colores.peligro },
   referencia: {
     flexDirection: 'row',
     alignItems: 'center',

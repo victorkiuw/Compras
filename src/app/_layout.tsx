@@ -47,6 +47,10 @@ export default function RootLayout() {
           <Stack.Screen name="importar" options={{ title: 'Pegar lista', presentation: 'modal' }} />
           <Stack.Screen name="historial/[id]" options={{ title: 'Detalle de compra' }} />
           <Stack.Screen name="producto/[id]" options={{ title: 'Producto' }} />
+          <Stack.Screen name="comercios" options={{ title: 'Comercios' }} />
+          <Stack.Screen name="reporte" options={{ title: 'Reporte semanal' }} />
+          <Stack.Screen name="respaldo" options={{ title: 'Respaldo de datos' }} />
+          <Stack.Screen name="expo-sharing" options={{ headerShown: false }} />
         </Stack>
       )}
     </SafeAreaProvider>

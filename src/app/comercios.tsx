@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Boton, Chip, colores, estilos, Icono } from '../../components/ui';
-import * as repo from '../../db/repo';
-import type { Comercio, TipoComercio } from '../../db/repo';
-import { useCompraStore } from '../../store/useCompraStore';
+import { Boton, Chip, colores, estilos, Icono } from '../components/ui';
+import * as repo from '../db/repo';
+import type { Comercio, TipoComercio } from '../db/repo';
+import { useCompraStore } from '../store/useCompraStore';
 
 const TIPOS: TipoComercio[] = ['Mayorista', 'Supermercado', 'Otro'];
 

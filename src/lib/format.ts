@@ -83,3 +83,8 @@ export function haceCuanto(iso: string, ahora = new Date()): string {
   const meses = Math.floor(dias / 30);
   return meses === 1 ? 'hace 1 mes' : `hace ${meses} meses`;
 }
+
+/** Días completos transcurridos desde una fecha ISO. */
+export function diasDesde(iso: string, ahora = new Date()): number {
+  return Math.floor((ahora.getTime() - new Date(iso).getTime()) / 86_400_000);
+}

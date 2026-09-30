@@ -35,7 +35,18 @@
           "photosPermission": "La app accede a tus fotos para adjuntar tickets y facturas de compra."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "text/plain"
+            ]
+          }
+        }
+      ]
     ]
   }
 }
