@@ -1,17 +1,21 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colores, estilos, Icono, Vacio } from '../../components/ui';
+import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Boton, colores, estilos, Icono, Vacio } from '../../components/ui';
 import * as repo from '../../db/repo';
 import type { ProductoRadar } from '../../db/repo';
+import { compartirArchivo, fechaArchivo, MIME_XLSX } from '../../lib/archivos';
+import { hojasPrecios } from '../../lib/exportPrecios';
 import { formatBs, formatNumero, haceCuanto } from '../../lib/format';
 import { bsHoy, formatPrecioRef } from '../../lib/precios';
+import { crearXlsx } from '../../lib/xlsx';
 import { useCompraStore } from '../../store/useCompraStore';
 
 export default function Radar() {
   const tasa = useCompraStore((s) => s.tasaBs);
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState<ProductoRadar[]>([]);
+  const [exportando, setExportando] = useState(false);
   const busquedaRef = useRef(busqueda);
   useEffect(() => {
     busquedaRef.current = busqueda;
@@ -33,6 +37,19 @@ export default function Radar() {
     }, [buscar]),
   );
 
+  const exportar = async () => {
+    setExportando(true);
+    try {
+      const registros = await repo.todosLosPrecios();
+      if (!registros.length) return Alert.alert('Sin precios', 'Todavía no hay precios registrados para exportar.');
+      await compartirArchivo(`Precios ${fechaArchivo()}.xlsx`, crearXlsx(hojasPrecios(registros)), MIME_XLSX, 'Precios por negocio');
+    } catch (e) {
+      Alert.alert('No se pudo exportar', e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportando(false);
+    }
+  };
+
   return (
     <View style={{ flex: 1 }}>
       <View style={s.buscador}>
@@ -53,6 +70,17 @@ export default function Radar() {
         contentContainerStyle={{ padding: 12, gap: 10, paddingBottom: 32 }}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => <TarjetaProducto producto={item} tasa={tasa} />}
+        ListHeaderComponent={
+          resultados.length > 0 ? (
+            <Boton
+              titulo={exportando ? 'Generando Excel…' : 'Exportar todos los precios a Excel'}
+              icono="download-outline"
+              variante="secundario"
+              onPress={exportar}
+              deshabilitado={exportando}
+            />
+          ) : null
+        }
         ListEmptyComponent={
           <Vacio
             icono="pricetags-outline"

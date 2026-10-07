@@ -1,3 +1,4 @@
+import type { RegistroPrecio } from '../lib/exportPrecios';
 import type { CompraRegistrada } from '../lib/ahorro';
 import { normalizarNombre, type ItemParseado } from '../lib/parser';
 import { getDb } from './database';
@@ -829,4 +830,17 @@ export async function datosReporte(desde: string, hasta: string): Promise<DatosR
     listarCreditos(true),
   ]);
   return { compras, noHabia, abonos, creditosPendientes };
+}
+
+/** Todos los precios registrados, para exportarlos a Excel. */
+export async function todosLosPrecios(): Promise<RegistroPrecio[]> {
+  const db = await getDb();
+  return db.getAllAsync<RegistroPrecio>(
+    `SELECT p.nombre AS producto, COALESCE(r.unidad, p.unidad) AS unidad, c.nombre AS comercio,
+       r.precio_unitario_usd, r.precio_unitario_bs, r.tasa_bs, r.cantidad, r.fecha
+     FROM registro_precio_historico r
+     JOIN producto p ON p.id = r.producto_id
+     JOIN comercio c ON c.id = r.comercio_id
+     ORDER BY p.nombre COLLATE NOCASE, r.fecha`,
+  );
 }
