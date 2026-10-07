@@ -844,3 +844,40 @@ export async function todosLosPrecios(): Promise<RegistroPrecio[]> {
      ORDER BY p.nombre COLLATE NOCASE, r.fecha`,
   );
 }
+
+// ───────────── Corrección de comercio ─────────────
+
+/** Factura a la que pertenece un precio registrado y cuántos productos tiene. */
+export async function facturaDeRegistro(registroId: number): Promise<{ facturaId: number | null; productos: number }> {
+  const db = await getDb();
+  const fila = await db.getFirstAsync<{ factura_id: number | null; productos: number }>(
+    `SELECT i.factura_id,
+       (SELECT COUNT(*) FROM item_compra x WHERE x.factura_id = i.factura_id) AS productos
+     FROM registro_precio_historico r LEFT JOIN item_compra i ON i.id = r.item_id
+     WHERE r.id = ?`,
+    registroId,
+  );
+  return { facturaId: fila?.factura_id ?? null, productos: fila?.factura_id ? fila.productos : 1 };
+}
+
+/** Cambia el comercio de una factura completa: sus productos y sus precios en el historial. */
+export async function cambiarComercioFactura(facturaId: number, comercioId: number) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE factura SET comercio_id = ? WHERE id = ?', comercioId, facturaId);
+    await db.runAsync('UPDATE item_compra SET comercio_id = ? WHERE factura_id = ?', comercioId, facturaId);
+    await db.runAsync(
+      'UPDATE registro_precio_historico SET comercio_id = ? WHERE item_id IN (SELECT id FROM item_compra WHERE factura_id = ?)',
+      comercioId,
+      facturaId,
+    );
+  });
+}
+
+/** Corrige el comercio de un precio: si viene de una factura, se corrige la factura entera. */
+export async function cambiarComercioRegistro(registroId: number, comercioId: number) {
+  const { facturaId } = await facturaDeRegistro(registroId);
+  if (facturaId) return cambiarComercioFactura(facturaId, comercioId);
+  const db = await getDb();
+  await db.runAsync('UPDATE registro_precio_historico SET comercio_id = ? WHERE id = ?', comercioId, registroId);
+}

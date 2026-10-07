@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Boton, colores, estilos, Icono, type NombreIcono } from './ui';
 
@@ -19,6 +19,7 @@ export function MenuOpciones({ titulo, opciones, onCerrar }: { titulo?: string; 
       <View style={[s.hoja, { paddingBottom: insets.bottom + 12 }]}>
         <View style={s.asa} />
         {titulo && <Text style={s.titulo}>{titulo}</Text>}
+        <ScrollView>
         {opciones.map((o) => (
           <Pressable
             key={o.titulo}
@@ -32,6 +33,7 @@ export function MenuOpciones({ titulo, opciones, onCerrar }: { titulo?: string; 
             <Text style={[s.opcionTexto, o.peligro && { color: colores.peligro }]}>{o.titulo}</Text>
           </Pressable>
         ))}
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -90,10 +92,33 @@ export function PedirTexto({
 const s = StyleSheet.create({
   fondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   centro: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 20 },
-  hoja: { backgroundColor: colores.superficie, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 8, paddingTop: 8 },
+  hoja: { backgroundColor: colores.superficie, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 8, paddingTop: 8, maxHeight: '80%' },
   asa: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colores.borde, marginBottom: 6 },
   titulo: { fontSize: 18, fontWeight: '700', color: colores.texto, paddingHorizontal: 12, paddingVertical: 6 },
   mensaje: { fontSize: 15, color: colores.textoSuave, lineHeight: 21 },
   opcion: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 54, paddingHorizontal: 14, borderRadius: 12 },
   opcionTexto: { fontSize: 17, color: colores.texto, fontWeight: '500' },
 });
+
+/** Lista de comercios para corregir dónde se hizo una compra. Montarlo solo cuando está abierto. */
+export function ElegirComercio({
+  comercios,
+  actual,
+  onElegir,
+  onCerrar,
+}: {
+  comercios: { id: number; nombre: string }[];
+  actual: string | null;
+  onElegir: (comercioId: number) => void;
+  onCerrar: () => void;
+}) {
+  return (
+    <MenuOpciones
+      titulo={`¿En qué comercio fue?${actual ? ` (ahora: ${actual})` : ''}`}
+      opciones={comercios
+        .filter((c) => c.nombre !== actual)
+        .map((c) => ({ titulo: c.nombre, icono: 'storefront-outline' as const, onPress: () => onElegir(c.id) }))}
+      onCerrar={onCerrar}
+    />
+  );
+}

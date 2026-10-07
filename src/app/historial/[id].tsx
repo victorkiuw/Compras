@@ -1,7 +1,9 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Boton, colores, estilos } from '../../components/ui';
+import { ElegirComercio } from '../../components/Dialogos';
+import { Boton, colores, estilos, Icono } from '../../components/ui';
+import { useCompraStore } from '../../store/useCompraStore';
 import * as repo from '../../db/repo';
 import type { Factura, Item, Lista } from '../../db/repo';
 import { formatBs, formatCantidad, formatFechaHora, formatTasa, formatUsd } from '../../lib/format';
@@ -21,6 +23,8 @@ export default function DetalleCompra() {
   const [lista, setLista] = useState<Lista | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [facturas, setFacturas] = useState<Factura[]>([]);
+  const [corrigiendo, setCorrigiendo] = useState<Factura | null>(null);
+  const comercios = useCompraStore((st) => st.comercios);
   const [fotoAbierta, setFotoAbierta] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,6 +33,13 @@ export default function DetalleCompra() {
     repo.getItems(listaId).then(setItems);
     repo.getFacturas(listaId).then(setFacturas);
   }, [id]);
+
+  const corregirComercio = async (f: Factura, comercioId: number) => {
+    await repo.cambiarComercioFactura(f.id, comercioId);
+    const listaId = Number(id);
+    setFacturas(await repo.getFacturas(listaId));
+    setItems(await repo.getItems(listaId));
+  };
 
   const comprados = items.filter((i) => i.comprado);
   const noComprados = items.filter((i) => !i.comprado);
@@ -73,13 +84,15 @@ export default function DetalleCompra() {
         {facturas.map((f) => (
           <View key={f.id} style={[estilos.tarjeta, { gap: 6 }]}>
             <View style={s.filaEntre}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.facturaTitulo}>{f.comercio_nombre ?? 'Sin comercio'}</Text>
+              <Pressable style={{ flex: 1 }} onPress={() => setCorrigiendo(f)} accessibilityLabel="Cambiar comercio">
+                <Text style={s.facturaTitulo}>
+                  {f.comercio_nombre ?? 'Sin comercio'} <Icono name="create-outline" size={16} color={colores.acento} />
+                </Text>
                 <Text style={s.meta}>
                   {f.metodo_pago}
                   {f.tasa_bs ? ` · ${formatTasa(f.tasa_bs)}` : ''}
                 </Text>
-              </View>
+              </Pressable>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={s.precio}>{formatBs(f.total_bs)}</Text>
                 {f.total_usd != null && <Text style={s.meta}>{formatUsd(f.total_usd)}</Text>}
@@ -121,6 +134,15 @@ export default function DetalleCompra() {
 
         <Boton titulo="Eliminar esta compra" variante="texto" icono="trash-outline" onPress={eliminar} />
       </ScrollView>
+
+      {corrigiendo && (
+        <ElegirComercio
+          comercios={comercios}
+          actual={corrigiendo.comercio_nombre}
+          onElegir={(comercioId) => corregirComercio(corrigiendo, comercioId)}
+          onCerrar={() => setCorrigiendo(null)}
+        />
+      )}
 
       <Modal visible={!!fotoAbierta} transparent animationType="fade" onRequestClose={() => setFotoAbierta(null)}>
         <Pressable style={s.visor} onPress={() => setFotoAbierta(null)}>

@@ -1,6 +1,7 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ElegirComercio } from '../../components/Dialogos';
 import { colores, estilos, Icono, Vacio } from '../../components/ui';
 import * as repo from '../../db/repo';
 import type { RegistroHistorico } from '../../db/repo';
@@ -13,11 +14,33 @@ export default function DetalleProducto() {
   const tasa = useCompraStore((s) => s.tasaBs);
   const [producto, setProducto] = useState<{ nombre: string; unidad: string | null } | null>(null);
   const [registros, setRegistros] = useState<RegistroHistorico[]>([]);
+  const [corrigiendo, setCorrigiendo] = useState<RegistroHistorico | null>(null);
+  const comercios = useCompraStore((s) => s.comercios);
+  const recargarCompra = useCompraStore((s) => s.recargar);
 
   useEffect(() => {
     repo.getProducto(Number(id)).then(setProducto);
     repo.historialProducto(Number(id)).then(setRegistros);
   }, [id]);
+
+  const corregirComercio = async (r: RegistroHistorico, comercioId: number) => {
+    const nuevo = comercios.find((c) => c.id === comercioId)?.nombre ?? '';
+    const { productos } = await repo.facturaDeRegistro(r.id);
+    const aplicar = async () => {
+      await repo.cambiarComercioRegistro(r.id, comercioId);
+      setRegistros(await repo.historialProducto(Number(id)));
+      await recargarCompra();
+    };
+    if (productos <= 1) return aplicar();
+    Alert.alert(
+      'Cambiar comercio',
+      `Esta compra fue parte de una factura con ${productos} productos. Se cambiará a «${nuevo}» la factura completa.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cambiar', onPress: aplicar },
+      ],
+    );
+  };
 
   const resumen = useMemo(() => calcularResumen(registros), [registros]);
   const variaciones = useMemo(() => variacionesPorComercio(registros), [registros]);
@@ -106,7 +129,7 @@ export default function DetalleProducto() {
             {registros.map((r, idx) => {
               const v = variaciones.get(idx);
               return (
-                <View key={r.id} style={s.registro}>
+                <Pressable key={r.id} onPress={() => setCorrigiendo(r)} style={({ pressed }) => [s.registro, pressed && { opacity: 0.6 }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.registroTitulo}>
                       {formatFecha(r.fecha)} · {r.comercio_nombre}
@@ -128,13 +151,21 @@ export default function DetalleProducto() {
                       </Text>
                     )}
                   </View>
-                </View>
+                </Pressable>
               );
             })}
-            <Text style={[s.explicacion, { marginTop: 6 }]}>▲▼ = cambio frente a la compra anterior en el mismo comercio.</Text>
+            <Text style={[s.explicacion, { marginTop: 6 }]}>▲▼ = cambio frente a la compra anterior en el mismo comercio. Toca una compra para corregir el comercio.</Text>
           </View>
         )}
       </ScrollView>
+      {corrigiendo && (
+        <ElegirComercio
+          comercios={comercios}
+          actual={corrigiendo.comercio_nombre}
+          onElegir={(comercioId) => corregirComercio(corrigiendo, comercioId)}
+          onCerrar={() => setCorrigiendo(null)}
+        />
+      )}
     </>
   );
 }
