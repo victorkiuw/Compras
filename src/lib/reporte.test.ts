@@ -9,7 +9,7 @@ import { crearXlsx } from './xlsx.ts';
 const entrada: EntradaReporte = {
   compras: [
     { factura_id: 1, fecha: '2026-09-28T14:00:00Z', comercio: 'Makro', metodo_pago: 'Tarjeta', tasa_bs: 40, producto: 'Harina', cantidad: 2, unidad: 'Bulto', total_usd: 30, total_bs: 1200 },
-    { factura_id: 1, fecha: '2026-09-28T14:00:00Z', comercio: 'Makro', metodo_pago: 'Tarjeta', tasa_bs: 40, producto: 'Aceite', cantidad: 1, unidad: 'Caja', total_usd: 20, total_bs: 800 },
+    { factura_id: 1, fecha: '2026-09-28T14:00:00Z', comercio: 'Makro', metodo_pago: 'Tarjeta', tasa_bs: 40, producto: 'Aceite', cantidad: 1, unidad: 'Caja', total_usd: 23.2, total_bs: 928, iva_pct: 16 },
     { factura_id: 2, fecha: '2026-09-29T14:00:00Z', comercio: 'Hyperlider', metodo_pago: 'Crédito', tasa_bs: 40, producto: 'Harina', cantidad: 1, unidad: 'Bulto', total_usd: 16, total_bs: 640 },
   ],
   noHabia: [{ fecha: '2026-09-28T10:00:00Z', producto: 'Queso <blanco> & "duro"', cantidad: 2, unidad: 'Kg' }],
@@ -21,15 +21,16 @@ const entrada: EntradaReporte = {
 
 test('resumen de la semana separa pagado y crédito', () => {
   const r = resumirSemana(entrada);
-  assert.equal(r.pagadoUsd, 50);
-  assert.equal(r.pagadoBs, 2000);
+  assert.equal(r.pagadoUsd, 53.2);
+  assert.ok(Math.abs(r.ivaUsd - 3.2) < 1e-9);
+  assert.equal(r.pagadoBs, 2128);
   assert.equal(r.creditoUsd, 16);
   assert.equal(r.facturas, 2);
   const harina = r.porProducto.find((p) => p.producto === 'Harina')!;
   assert.equal(harina.cantidad, 3);
   assert.equal(harina.mejorComercio, 'Makro');
   assert.equal(harina.mejorUsd, 15);
-  assert.deepEqual(r.porComercio.map((c) => [c.comercio, c.usd, c.creditoUsd]), [['Makro', 50, 0], ['Hyperlider', 0, 16]]);
+  assert.deepEqual(r.porComercio.map((c) => [c.comercio, c.usd, c.creditoUsd]), [['Makro', 53.2, 0], ['Hyperlider', 0, 16]]);
 });
 
 test('semana de lunes a domingo', () => {

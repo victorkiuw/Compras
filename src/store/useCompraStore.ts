@@ -27,6 +27,8 @@ interface CompraState {
   tasaSinConexion: boolean;
   /** Fecha del último respaldo exportado (para recordar hacer uno cada semana). */
   ultimoRespaldo: string | null;
+  /** Si cada comercio suele cobrar IVA aparte (clave: comercio_id). */
+  ivaPorComercio: Record<number, boolean>;
   /** Moneda en la que se escriben los precios por defecto. */
   moneda: Moneda;
 
@@ -68,6 +70,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
   actualizandoTasa: false,
   tasaSinConexion: false,
   ultimoRespaldo: null,
+  ivaPorComercio: {},
   moneda: 'USD',
 
   iniciar: async () => {
@@ -96,6 +99,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       repo.getAjuste('tasa_tipo'),
       repo.getAjuste('ultimo_respaldo'),
     ]);
+    const ivaPorComercio = await repo.ivaPorComercio();
     set({
       lista,
       items,
@@ -111,6 +115,7 @@ export const useCompraStore = create<CompraState>((set, get) => ({
       tasaFuente: fuente,
       tasaTipo: tipo === 'paralelo' ? 'paralelo' : 'oficial',
       ultimoRespaldo,
+      ivaPorComercio,
     });
   },
 

@@ -7,6 +7,7 @@ import { useCompraStore } from '../../store/useCompraStore';
 import * as repo from '../../db/repo';
 import type { Factura, Item, Lista } from '../../db/repo';
 import { formatBs, formatCantidad, formatFechaHora, formatTasa, formatUsd } from '../../lib/format';
+import { sinIva } from '../../lib/iva';
 
 function agrupar(facturas: Factura[], clave: (f: Factura) => string | null) {
   const mapa = new Map<string, { bs: number; usd: number }>();
@@ -40,6 +41,12 @@ export default function DetalleCompra() {
     setFacturas(await repo.getFacturas(listaId));
     setItems(await repo.getItems(listaId));
   };
+
+  // IVA incluido en una factura: total pagado menos la base de cada producto.
+  const ivaDeFactura = (facturaId: number) =>
+    items
+      .filter((i) => i.factura_id === facturaId)
+      .reduce((t, i) => t + (i.precio_pagado_bs ?? 0) - sinIva(i.precio_pagado_bs ?? 0, i.iva_pct ?? 0), 0);
 
   const comprados = items.filter((i) => i.comprado);
   const noComprados = items.filter((i) => !i.comprado);
@@ -91,6 +98,7 @@ export default function DetalleCompra() {
                 <Text style={s.meta}>
                   {f.metodo_pago}
                   {f.tasa_bs ? ` · ${formatTasa(f.tasa_bs)}` : ''}
+                  {f.iva ? ` · IVA ${formatBs(ivaDeFactura(f.id))}` : ''}
                 </Text>
               </Pressable>
               <View style={{ alignItems: 'flex-end' }}>

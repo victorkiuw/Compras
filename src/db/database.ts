@@ -172,6 +172,15 @@ const MIGRACIONES: Migracion[] = [
     creada TEXT NOT NULL
   );
   `,
+
+  // v4: IVA. producto.iva recuerda si el producto lleva IVA (16) o es exento (0);
+  // item_compra.iva_pct es el IVA aplicado (los montos pagados ya lo incluyen) y factura.iva
+  // indica si a la factura se le sumó IVA.
+  `
+  ALTER TABLE producto ADD COLUMN iva REAL;
+  ALTER TABLE item_compra ADD COLUMN iva_pct REAL;
+  ALTER TABLE factura ADD COLUMN iva INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;

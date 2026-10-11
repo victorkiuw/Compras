@@ -18,6 +18,7 @@ import * as repo from '../db/repo';
 import { METODOS_PAGO, type Item, type MetodoPago } from '../db/repo';
 import { convertir, formatBs, formatCantidad, formatFecha, formatNumero, formatUsd, haceCuanto, parseMonto, type Moneda } from '../lib/format';
 import { obtenerFotoFactura } from '../lib/fotos';
+import { conIva, IVA_GENERAL, sinIva, sugerirExento } from '../lib/iva';
 import { formatPrecioRef } from '../lib/precios';
 import { useCompraStore } from '../store/useCompraStore';
 import { Boton, Chip, colores, estilos, Icono, Segmentado } from './ui';
@@ -50,7 +51,10 @@ function sumarDias(dias: number): string {
 interface Linea {
   itemId: number;
   cantidadTxt: string;
+  /** Precio escrito, SIN IVA (el IVA se suma al final si la factura lo lleva). */
   precioTxt: string;
+  /** Exento de IVA. */
+  exento: boolean;
 }
 
 /**
@@ -72,6 +76,7 @@ interface EstadoInicial {
   metodo: MetodoPago;
   foto: string | null;
   vence: string | null;
+  iva: boolean;
 }
 
 function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompraStore.getState>): EstadoInicial {
@@ -86,25 +91,30 @@ function estadoInicial(apertura: AperturaFactura, st: ReturnType<typeof useCompr
       lineas: suyos.map((i) => ({
         itemId: i.id,
         cantidadTxt: formatCantidad(i.cantidad_comprada) || '1',
-        precioTxt: formatNumero((moneda === 'USD' ? i.precio_pagado_usd : i.precio_pagado_bs) ?? 0),
+        // Lo guardado incluye el IVA: para editar se muestra el precio sin IVA.
+        precioTxt: formatNumero(sinIva((moneda === 'USD' ? i.precio_pagado_usd : i.precio_pagado_bs) ?? 0, i.iva_pct ?? 0)),
+        exento: factura.iva ? (i.iva_pct ?? 0) === 0 : exentoSugerido(i),
       })),
       tasaTxt: factura.tasa_bs ? formatNumero(factura.tasa_bs) : null,
       comercioId: factura.comercio_id,
       metodo: factura.metodo_pago ?? st.ultimoMetodo,
       foto: factura.foto_uri,
       vence: factura.vence,
+      iva: !!factura.iva,
     };
   }
+  const comercioId =
+    st.ultimoComercioId && comercios.some((c) => c.id === st.ultimoComercioId) ? st.ultimoComercioId : (comercios[0]?.id ?? null);
   return {
     moneda: st.moneda,
     modoPrecio: 'unitario',
     lineas: apertura.itemIds.map((id) => nuevaLinea(items.find((i) => i.id === id))),
     tasaTxt: null,
-    comercioId:
-      st.ultimoComercioId && comercios.some((c) => c.id === st.ultimoComercioId) ? st.ultimoComercioId : comercios[0]?.id ?? null,
+    comercioId,
     metodo: st.ultimoMetodo,
     foto: null,
     vence: null,
+    iva: comercioId != null ? (st.ivaPorComercio[comercioId] ?? false) : false,
   };
 }
 
@@ -123,6 +133,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const [metodo, setMetodo] = useState<MetodoPago>(inicial.metodo);
   const [foto, setFoto] = useState<string | null>(inicial.foto);
   const [vence, setVence] = useState<string | null>(inicial.vence);
+  const [ivaActivo, setIvaActivo] = useState(inicial.iva);
+  const [ivaTocado, setIvaTocado] = useState(false);
   const [nuevoComercio, setNuevoComercio] = useState<string | null>(null);
   const [mostrarPendientes, setMostrarPendientes] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -131,23 +143,41 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const tasa = parseMonto(tasaTxt);
   const itemDe = (id: number) => items.find((i) => i.id === id);
 
+  const ivaDe = (l: Linea) => (ivaActivo && !l.exento ? IVA_GENERAL : 0);
+
+  /** Montos de una línea: base sin IVA y total con IVA (usd/bs/unitarios ya lo incluyen). */
   const calcular = (l: Linea) => {
     const cantidad = parseMonto(l.cantidadTxt) ?? 0;
     const monto = parseMonto(l.precioTxt) ?? 0;
     const totalMoneda = modoPrecio === 'total' ? monto : monto * cantidad;
-    const { usd, bs } = convertir(totalMoneda, moneda, tasa);
+    const base = convertir(totalMoneda, moneda, tasa);
+    const pct = ivaDe(l);
+    const usd = base.usd != null ? conIva(base.usd, pct) : null;
+    const bs = base.bs != null ? conIva(base.bs, pct) : null;
     const unitarioUsd = usd != null && cantidad > 0 ? usd / cantidad : null;
     const unitarioBs = bs != null && cantidad > 0 ? bs / cantidad : null;
-    return { cantidad, monto, usd, bs, unitarioUsd, unitarioBs };
+    return { cantidad, monto, pct, baseUsd: base.usd, baseBs: base.bs, usd, bs, unitarioUsd, unitarioBs };
   };
 
   const totales = lineas.reduce(
     (acc, l) => {
       const c = calcular(l);
-      return { usd: acc.usd + (c.usd ?? 0), bs: acc.bs + (c.bs ?? 0) };
+      return {
+        usd: acc.usd + (c.usd ?? 0),
+        bs: acc.bs + (c.bs ?? 0),
+        ivaUsd: acc.ivaUsd + ((c.usd ?? 0) - (c.baseUsd ?? 0)),
+        ivaBs: acc.ivaBs + ((c.bs ?? 0) - (c.baseBs ?? 0)),
+      };
     },
-    { usd: 0, bs: 0 },
+    { usd: 0, bs: 0, ivaUsd: 0, ivaBs: 0 },
   );
+  const exentas = lineas.filter((l) => l.exento).length;
+
+  const elegirComercio = (id: number) => {
+    setComercioId(id);
+    // Cada comercio recuerda si cobra IVA aparte, salvo que ya lo hayas cambiado aquí.
+    if (!ivaTocado && st.ivaPorComercio[id] != null) setIvaActivo(st.ivaPorComercio[id]);
+  };
 
   const actualizar = (itemId: number, cambios: Partial<Linea>) =>
     setLineas((ls) => ls.map((l) => (l.itemId === itemId ? { ...l, ...cambios } : l)));
@@ -194,6 +224,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
     if (moneda === 'USD') unit = ref.precio_unitario_usd ?? (tasa ? ref.precio_unitario_bs / tasa : null);
     else unit = ref.precio_unitario_usd != null && tasa ? ref.precio_unitario_usd * tasa : ref.precio_unitario_bs;
     if (unit == null) return;
+    // El precio guardado incluye el IVA que se pagó; el campo se escribe sin IVA.
+    unit = sinIva(unit, ivaDe(l));
     const cantidad = parseMonto(l.cantidadTxt) ?? 1;
     actualizar(l.itemId, { precioTxt: formatNumero(modoPrecio === 'total' ? unit * cantidad : unit) });
   };
@@ -236,8 +268,9 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
         vence,
         lineas: lineas.map((l) => {
           const c = calcular(l);
-          return { itemId: l.itemId, cantidad: c.cantidad, totalBs: c.bs ?? 0, totalUsd: c.usd };
+          return { itemId: l.itemId, cantidad: c.cantidad, totalBs: c.bs ?? 0, totalUsd: c.usd, ivaPct: ivaActivo ? c.pct : null };
         }),
+        iva: ivaActivo,
       });
       if (tasa && !st.tasaBs) await st.setTasa(tasa);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -384,6 +417,7 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
                   {c.monto > 0 && c.cantidad > 0 && (
                     <Text style={s.calculo}>
                       {modoPrecio === 'unitario' ? 'Total ' : 'Unidad '}
+                      {c.pct > 0 ? 'con IVA ' : ''}
                       {modoPrecio === 'unitario'
                         ? [c.usd != null && formatUsd(c.usd), c.bs != null && formatBs(c.bs)].filter(Boolean).join(' · ')
                         : [c.unitarioUsd != null && formatUsd(c.unitarioUsd), c.unitarioBs != null && formatBs(c.unitarioBs)]
@@ -454,7 +488,7 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
               <Text style={estilos.etiqueta}>Comercio</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
                 {comercios.map((c) => (
-                  <Chip key={c.id} texto={c.nombre} activo={c.id === comercioId} onPress={() => setComercioId(c.id)} />
+                  <Chip key={c.id} texto={c.nombre} activo={c.id === comercioId} onPress={() => elegirComercio(c.id)} />
                 ))}
                 {nuevoComercio === null && <Chip texto="Nuevo" icono="add" activo={false} onPress={() => setNuevoComercio('')} />}
               </ScrollView>
@@ -520,10 +554,82 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
               )}
             </View>
 
+            {/* IVA: al final, como en el ticket */}
+            <View style={[estilos.tarjeta, { gap: 10 }]}>
+              <Text style={estilos.etiqueta}>IVA</Text>
+              <Segmentado
+                opciones={[
+                  { valor: 'no', etiqueta: 'Sin IVA aparte' },
+                  { valor: 'si', etiqueta: `Sumar IVA ${IVA_GENERAL}%` },
+                ]}
+                valor={ivaActivo ? 'si' : 'no'}
+                onCambio={(v) => {
+                  setIvaTocado(true);
+                  setIvaActivo(v === 'si');
+                }}
+              />
+              {ivaActivo ? (
+                <>
+                  <Text style={s.nota}>
+                    Escribe los precios sin IVA; se suma el {IVA_GENERAL}% a los productos gravados. Toca un producto para marcarlo como exento o
+                    gravado (la app lo recuerda para la próxima vez).
+                  </Text>
+                  {lineas.map((l) => {
+                    const item = itemDe(l.itemId);
+                    if (!item) return null;
+                    return (
+                      <Pressable
+                        key={l.itemId}
+                        onPress={() => actualizar(l.itemId, { exento: !l.exento })}
+                        style={({ pressed }) => [s.filaIva, pressed && { opacity: 0.7 }]}
+                        accessibilityLabel={`${item.producto_nombre}: ${l.exento ? 'exento' : 'gravado'}`}
+                      >
+                        <Text style={s.filaIvaNombre} numberOfLines={1}>
+                          {item.producto_nombre}
+                        </Text>
+                        <View style={[s.chipIva, l.exento ? s.chipExento : s.chipGravado]}>
+                          <Text style={[s.chipIvaTexto, { color: l.exento ? colores.primario : colores.aviso }]}>
+                            {l.exento ? 'Exento' : `IVA ${IVA_GENERAL}%`}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                  {lineas.length > 1 && (
+                    <View style={s.fila}>
+                      <Boton
+                        titulo="Todos gravados"
+                        variante="secundario"
+                        onPress={() => setLineas((ls) => ls.map((l) => ({ ...l, exento: false })))}
+                        style={{ flex: 1, minHeight: 40 }}
+                      />
+                      <Boton
+                        titulo="Sugerir según ley"
+                        variante="secundario"
+                        onPress={() => setLineas((ls) => ls.map((l) => ({ ...l, exento: exentoSugerido(itemDe(l.itemId)) })))}
+                        style={{ flex: 1, minHeight: 40 }}
+                      />
+                    </View>
+                  )}
+                  <Text style={s.ayudaIva}>
+                    La sugerencia se basa en los productos que la Ley del IVA suele exentar (canasta básica). Verifica con el ticket.
+                  </Text>
+                </>
+              ) : (
+                <Text style={s.nota}>Los precios que escribes ya son lo que pagas (con IVA incluido o sin IVA).</Text>
+              )}
+            </View>
+
             {editando && <Boton titulo="Desmarcar toda la factura" variante="texto" icono="arrow-undo-outline" onPress={eliminarFactura} />}
           </ScrollView>
 
           <View style={{ paddingTop: 10, gap: 4 }}>
+            {ivaActivo && totales.bs > 0 && (
+              <Text style={s.resumen}>
+                Subtotal {formatBs(totales.bs - totales.ivaBs)} + IVA {formatBs(totales.ivaBs)}
+                {exentas ? ` · ${exentas} exento${exentas === 1 ? '' : 's'}` : ''}
+              </Text>
+            )}
             {totales.bs > 0 && (
               <Text style={s.resumen}>
                 {lineas.length} {lineas.length === 1 ? 'producto' : 'productos'} · pagas {formatBs(totales.bs)}
@@ -542,8 +648,15 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   );
 }
 
+/** Exento según lo que se decidió antes para el producto o, si nunca se decidió, según la ley. */
+function exentoSugerido(item: Item | undefined): boolean {
+  if (!item) return false;
+  if (item.producto_iva != null) return item.producto_iva === 0;
+  return sugerirExento(item.producto_nombre);
+}
+
 function nuevaLinea(item: Item | undefined): Linea {
-  return { itemId: item?.id ?? 0, cantidadTxt: formatCantidad(item?.cantidad_pedida ?? 1) || '1', precioTxt: '' };
+  return { itemId: item?.id ?? 0, cantidadTxt: formatCantidad(item?.cantidad_pedida ?? 1) || '1', precioTxt: '', exento: exentoSugerido(item) };
 }
 
 const s = StyleSheet.create({
@@ -591,6 +704,13 @@ const s = StyleSheet.create({
   inputPrecio: { flex: 1, fontSize: 20, fontWeight: '700', color: colores.texto, paddingVertical: 8 },
   calculo: { fontSize: 14, color: colores.texto, fontWeight: '600' },
   nota: { fontSize: 14, color: colores.textoSuave },
+  filaIva: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 40 },
+  filaIvaNombre: { flex: 1, fontSize: 15, color: colores.texto },
+  chipIva: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, minWidth: 82, alignItems: 'center' },
+  chipExento: { backgroundColor: colores.primarioSuave },
+  chipGravado: { backgroundColor: colores.avisoSuave },
+  chipIvaTexto: { fontSize: 13, fontWeight: '700' },
+  ayudaIva: { fontSize: 12, color: colores.textoSuave },
   credito: { padding: 12, borderRadius: 12, backgroundColor: colores.avisoSuave },
   creditoTexto: { fontSize: 14, color: colores.texto, lineHeight: 20 },
   alerta: {

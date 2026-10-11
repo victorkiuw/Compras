@@ -44,6 +44,10 @@ export interface Item {
   nota: string | null;
   /** 1 = se buscó y no había. */
   no_disponible: number;
+  /** IVA aplicado en la compra (0 = exento, 16 = gravado); los montos pagados lo incluyen. */
+  iva_pct: number | null;
+  /** Lo que se recuerda del producto: 0 exento, 16 gravado, null sin decidir. */
+  producto_iva: number | null;
 }
 
 export interface Factura {
@@ -60,6 +64,8 @@ export interface Factura {
   /** Solo en facturas a crédito: fecha límite de pago (ISO) y cuándo quedó saldada. */
   vence: string | null;
   pagada_en: string | null;
+  /** 1 si a la factura se le sumó IVA. */
+  iva: number;
 }
 
 /** Último precio conocido de un producto en un comercio. */
@@ -84,8 +90,11 @@ export interface ReferenciaPrecio {
 export interface LineaFactura {
   itemId: number;
   cantidad: number;
+  /** Montos pagados, con IVA incluido si aplica. */
   totalBs: number;
   totalUsd: number | null;
+  /** IVA de la línea: 0 exento, 16 gravado, null si la factura no lleva IVA. */
+  ivaPct: number | null;
 }
 
 export interface DatosFactura {
@@ -95,6 +104,8 @@ export interface DatosFactura {
   fotoUri: string | null;
   /** Fecha de vencimiento si es a crédito. */
   vence: string | null;
+  /** Si a la factura se le sumó IVA. */
+  iva: boolean;
   lineas: LineaFactura[];
 }
 
@@ -179,7 +190,7 @@ export async function getLista(id: number): Promise<Lista | null> {
 export async function getItems(listaId: number): Promise<Item[]> {
   const db = await getDb();
   return db.getAllAsync<Item>(
-    `SELECT i.*, p.nombre AS producto_nombre, c.nombre AS comercio_nombre
+    `SELECT i.*, p.nombre AS producto_nombre, p.iva AS producto_iva, c.nombre AS comercio_nombre
      FROM item_compra i
      JOIN producto p ON p.id = i.producto_id
      LEFT JOIN comercio c ON c.id = i.comercio_id
@@ -275,7 +286,7 @@ export async function importarItems(items: ItemParseado[], modo: 'nueva' | 'agre
 const DESMARCAR_ITEM = `
   UPDATE item_compra SET comprado = 0, comprado_en = NULL, cantidad_comprada = NULL, precio_pagado_bs = NULL,
     precio_pagado_usd = NULL, tasa_bs = NULL, comercio_id = NULL, metodo_pago = NULL, foto_factura_uri = NULL,
-    factura_id = NULL
+    factura_id = NULL, iva_pct = NULL
   WHERE id = ?`;
 
 const RECALCULAR_FACTURA = `
@@ -295,24 +306,26 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
   await db.withTransactionAsync(async () => {
     if (id == null) {
       const r = await db.runAsync(
-        'INSERT INTO factura (lista_id, comercio_id, metodo_pago, tasa_bs, foto_uri, vence, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO factura (lista_id, comercio_id, metodo_pago, tasa_bs, foto_uri, vence, iva, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         listaId,
         d.comercioId,
         d.metodo,
         d.tasaBs,
         d.fotoUri,
         d.metodo === 'Crédito' ? d.vence : null,
+        d.iva ? 1 : 0,
         fecha,
       );
       id = r.lastInsertRowId;
     } else {
       await db.runAsync(
-        'UPDATE factura SET comercio_id = ?, metodo_pago = ?, tasa_bs = ?, foto_uri = ?, vence = ? WHERE id = ?',
+        'UPDATE factura SET comercio_id = ?, metodo_pago = ?, tasa_bs = ?, foto_uri = ?, vence = ?, iva = ? WHERE id = ?',
         d.comercioId,
         d.metodo,
         d.tasaBs,
         d.fotoUri,
         d.metodo === 'Crédito' ? d.vence : null,
+        d.iva ? 1 : 0,
         id,
       );
       const anteriores = await db.getAllAsync<{ id: number }>('SELECT id FROM item_compra WHERE factura_id = ?', id);
@@ -331,7 +344,8 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
       if (!item) continue;
       await db.runAsync(
         `UPDATE item_compra SET comprado = 1, comprado_en = ?, cantidad_comprada = ?, precio_pagado_bs = ?,
-           precio_pagado_usd = ?, tasa_bs = ?, comercio_id = ?, metodo_pago = ?, foto_factura_uri = ?, factura_id = ?
+           precio_pagado_usd = ?, tasa_bs = ?, comercio_id = ?, metodo_pago = ?, foto_factura_uri = ?, factura_id = ?,
+           iva_pct = ?
          WHERE id = ?`,
         item.comprado_en ?? fecha,
         l.cantidad,
@@ -342,8 +356,11 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
         d.metodo,
         d.fotoUri,
         id,
+        l.ivaPct,
         l.itemId,
       );
+      // Se recuerda si el producto lleva IVA o es exento para proponerlo la próxima vez.
+      if (l.ivaPct != null) await db.runAsync('UPDATE producto SET iva = ? WHERE id = ?', l.ivaPct, item.producto_id);
       // Un registro histórico por ítem: si se edita la compra, se reemplaza.
       await db.runAsync('DELETE FROM registro_precio_historico WHERE item_id = ?', l.itemId);
       if (l.cantidad > 0 && l.totalBs > 0) {
@@ -367,10 +384,12 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
     await db.runAsync(RECALCULAR_FACTURA, id);
     await actualizarEstadoCredito(id!);
     await db.runAsync(
-      `INSERT INTO ajuste (clave, valor) VALUES ('ultimo_comercio', ?), ('ultimo_metodo', ?)
+      `INSERT INTO ajuste (clave, valor) VALUES ('ultimo_comercio', ?), ('ultimo_metodo', ?), (?, ?)
        ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`,
       String(d.comercioId),
       d.metodo,
+      `iva_comercio_${d.comercioId}`,
+      d.iva ? '1' : '0',
     );
   });
   return id!;
@@ -776,6 +795,7 @@ export interface FilaReporte {
   unidad: string | null;
   total_usd: number | null;
   total_bs: number | null;
+  iva_pct: number | null;
 }
 
 export interface NoHabiaReporte {
@@ -802,7 +822,7 @@ export async function datosReporte(desde: string, hasta: string): Promise<DatosR
   const [compras, noHabia, abonos, creditosPendientes] = await Promise.all([
     db.getAllAsync<FilaReporte>(
       `SELECT f.id AS factura_id, f.fecha, c.nombre AS comercio, f.metodo_pago, f.tasa_bs, p.nombre AS producto,
-         i.cantidad_comprada AS cantidad, i.unidad, i.precio_pagado_usd AS total_usd, i.precio_pagado_bs AS total_bs
+         i.cantidad_comprada AS cantidad, i.unidad, i.precio_pagado_usd AS total_usd, i.precio_pagado_bs AS total_bs, i.iva_pct
        FROM item_compra i
        JOIN factura f ON f.id = i.factura_id
        JOIN producto p ON p.id = i.producto_id
@@ -880,4 +900,11 @@ export async function cambiarComercioRegistro(registroId: number, comercioId: nu
   if (facturaId) return cambiarComercioFactura(facturaId, comercioId);
   const db = await getDb();
   await db.runAsync('UPDATE registro_precio_historico SET comercio_id = ? WHERE id = ?', comercioId, registroId);
+}
+
+/** Si cada comercio suele cobrar IVA aparte (según la última factura registrada ahí). */
+export async function ivaPorComercio(): Promise<Record<number, boolean>> {
+  const db = await getDb();
+  const filas = await db.getAllAsync<{ clave: string; valor: string }>("SELECT clave, valor FROM ajuste WHERE clave LIKE 'iva_comercio_%'");
+  return Object.fromEntries(filas.map((f) => [Number(f.clave.slice('iva_comercio_'.length)), f.valor === '1']));
 }

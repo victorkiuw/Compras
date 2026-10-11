@@ -569,6 +569,7 @@ function TarjetaFactura({ factura, items, onPress }: { factura: Factura; items: 
               : factura.tasa_bs
                 ? ` · ${formatTasa(factura.tasa_bs)}`
                 : ''}
+            {factura.iva ? ' · con IVA' : ''}
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>

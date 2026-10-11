@@ -1,4 +1,5 @@
 // Arma el reporte semanal (hojas de Excel) a partir de los datos de la base. Sin imports de React Native.
+import { sinIva } from './iva.ts';
 import type { Celda, Hoja } from './xlsx.ts';
 
 export interface CompraReporte {
@@ -12,6 +13,8 @@ export interface CompraReporte {
   unidad: string | null;
   total_usd: number | null;
   total_bs: number | null;
+  /** IVA aplicado (los totales ya lo incluyen); null si no se registró. */
+  iva_pct?: number | null;
 }
 
 export interface CreditoReporte {
@@ -53,6 +56,9 @@ export function rangoSemana(inicio: Date): { desde: Date; hasta: Date; titulo: s
 }
 
 export interface ResumenSemana {
+  /** IVA incluido en todo lo comprado (pagado y a crédito). */
+  ivaUsd: number;
+  ivaBs: number;
   pagadoBs: number;
   pagadoUsd: number;
   creditoUsd: number;
@@ -64,7 +70,7 @@ export interface ResumenSemana {
 }
 
 export function resumirSemana(e: EntradaReporte): ResumenSemana {
-  const r: ResumenSemana = { pagadoBs: 0, pagadoUsd: 0, creditoUsd: 0, facturas: 0, productos: e.compras.length, porMetodo: [], porComercio: [], porProducto: [] };
+  const r: ResumenSemana = { ivaUsd: 0, ivaBs: 0, pagadoBs: 0, pagadoUsd: 0, creditoUsd: 0, facturas: 0, productos: e.compras.length, porMetodo: [], porComercio: [], porProducto: [] };
   const metodos = new Map<string, { bs: number; usd: number }>();
   const comercios = new Map<string, { bs: number; usd: number; creditoUsd: number; facturas: Set<number> }>();
   const productos = new Map<string, ResumenSemana['porProducto'][number]>();
@@ -75,6 +81,8 @@ export function resumirSemana(e: EntradaReporte): ResumenSemana {
     const usd = c.total_usd ?? 0;
     const bs = c.total_bs ?? 0;
     facturas.add(c.factura_id);
+    r.ivaUsd += usd - sinIva(usd, c.iva_pct ?? 0);
+    r.ivaBs += bs - sinIva(bs, c.iva_pct ?? 0);
     if (credito) r.creditoUsd += usd;
     else {
       r.pagadoBs += bs;
@@ -130,6 +138,7 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
     ['Pagado en la semana', d(r.pagadoBs), d(r.pagadoUsd)],
     ['Comprado a crédito', null, d(r.creditoUsd)],
     [b('Total comprado'), dn(r.pagadoBs), dn(r.pagadoUsd + r.creditoUsd)],
+    ['IVA incluido en las compras', d(r.ivaBs), d(r.ivaUsd)],
     ['Pagos de créditos hechos en la semana', null, d(e.abonos.reduce((s, a) => s + a.monto_usd, 0))],
     ['Deuda pendiente total (a hoy)', null, d(deudaTotal)],
     [],
@@ -145,7 +154,7 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
   ];
 
   const compras: Celda[][] = [
-    [b('Fecha'), b('Comercio'), b('Método'), b('Producto'), b('Cantidad'), b('Unidad'), b('Precio unit. $'), b('Total $'), b('Total Bs.'), b('Tasa Bs/$'), b('Factura')],
+    [b('Fecha'), b('Comercio'), b('Método'), b('Producto'), b('Cantidad'), b('Unidad'), b('Precio unit. $'), b('Total $'), b('Total Bs.'), b('IVA'), b('IVA $'), b('Tasa Bs/$'), b('Factura')],
     ...e.compras.map((c) => [
       fechaCorta(c.fecha),
       c.comercio,
@@ -156,11 +165,13 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
       d(c.total_usd != null && c.cantidad ? c.total_usd / c.cantidad : null),
       d(c.total_usd),
       d(c.total_bs),
+      c.iva_pct == null ? null : c.iva_pct === 0 ? 'Exento' : `${c.iva_pct}%`,
+      d(c.total_usd != null && c.iva_pct ? c.total_usd - sinIva(c.total_usd, c.iva_pct) : null),
       d(c.tasa_bs),
       c.factura_id,
     ]),
     [],
-    [b('Totales'), null, null, null, null, null, null, dn(r.pagadoUsd + r.creditoUsd), dn(e.compras.reduce((s, c) => s + (c.total_bs ?? 0), 0))],
+    [b('Totales'), null, null, null, null, null, null, dn(r.pagadoUsd + r.creditoUsd), dn(e.compras.reduce((s, c) => s + (c.total_bs ?? 0), 0)), null, dn(r.ivaUsd)],
   ];
 
   const productos: Celda[][] = [
@@ -193,7 +204,7 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
 
   return [
     { nombre: 'Resumen', filas: resumen, anchos: [40, 16, 16, 14, 10] },
-    { nombre: 'Compras', filas: compras, anchos: [12, 18, 12, 28, 10, 10, 14, 12, 14, 12, 9], fijarEncabezado: true },
+    { nombre: 'Compras', filas: compras, anchos: [12, 18, 12, 28, 10, 10, 14, 12, 14, 9, 10, 12, 9], fijarEncabezado: true },
     { nombre: 'Productos', filas: productos, anchos: [28, 10, 10, 12, 14, 14, 18, 14], fijarEncabezado: true },
     { nombre: 'Créditos', filas: creditos, anchos: [20, 14, 12, 12, 12, 12, 40], fijarEncabezado: true },
     { nombre: 'No había', filas: noHabia, anchos: [12, 28, 16, 10], fijarEncabezado: true },
