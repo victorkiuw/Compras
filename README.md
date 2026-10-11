@@ -16,7 +16,7 @@ precios para saber dónde conviene comprar cada cosa. Los precios se anotan en d
 | **Precios** | Comercios ordenados del más barato al más caro por producto, con ficha de ahorro por comercio. Botón **Exportar todos los precios a Excel** (comparativa por negocio, precios de cada negocio y todos los registros). |
 | **Por pagar** | Deudas a crédito (en $) que paga el negocio, agrupadas por comercio, con vencidas resaltadas, **abonos o pago total** y envío por WhatsApp. |
 | **Historial** | Compras cerradas con lo pagado y lo que fue a crédito, detalle por factura y lo que no había. |
-| **Más** | **Reporte semanal en Excel** (Resumen, Compras, Productos, Créditos, No había), **respaldo** y restauración de datos (con recordatorio semanal), comercios. |
+| **Más** | **Reporte semanal en Excel** (Resumen, Compras, Productos, Créditos, No había), **respaldo** y restauración de datos (con recordatorio semanal) y **comercios por secciones** (Supermercado, Mayorista, Carnicería, Panadería, Farmacia… o propias). |
 
 Los cálculos de ahorro se hacen en dólares para que la inflación del bolívar no distorsione la comparación.
 

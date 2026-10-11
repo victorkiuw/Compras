@@ -1,11 +1,14 @@
 // Exportación de todos los precios registrados a Excel. Sin imports de React Native.
 import { fechaCorta } from './reporte.ts';
+import { compararSecciones } from './secciones.ts';
 import type { Celda, Hoja } from './xlsx.ts';
 
 export interface RegistroPrecio {
   producto: string;
   unidad: string | null;
   comercio: string;
+  /** Sección del comercio (Supermercado, Carnicería…). */
+  seccion?: string | null;
   precio_unitario_usd: number | null;
   precio_unitario_bs: number;
   tasa_bs: number | null;
@@ -58,7 +61,11 @@ export function resumirPrecios(registros: RegistroPrecio[]): ResumenPrecio[] {
 
 export function hojasPrecios(registros: RegistroPrecio[], generado = new Date()): Hoja[] {
   const resumen = resumirPrecios(registros);
-  const comercios = [...new Set(resumen.map((r) => r.comercio))].sort(porNombre);
+  const seccionDe = new Map(registros.map((r) => [r.comercio, r.seccion?.trim() || 'Otro']));
+  // Negocios ordenados por sección (Supermercado, Mayorista, Carnicería…) y luego por nombre.
+  const comercios = [...new Set(resumen.map((r) => r.comercio))].sort(
+    (a, c) => compararSecciones(seccionDe.get(a)!, seccionDe.get(c)!) || porNombre(a, c),
+  );
   const productos = [...new Set(resumen.map((r) => r.producto))].sort(porNombre);
 
   // 1) Comparativa: un producto por fila y el último precio en $ de cada negocio en columnas.
@@ -66,6 +73,7 @@ export function hojasPrecios(registros: RegistroPrecio[], generado = new Date())
     [{ v: `Precios por negocio · al ${fechaCorta(generado.toISOString())}`, estilo: 'titulo' }],
     ['Último precio por unidad en dólares registrado en cada negocio.'],
     [],
+    [null, null, ...comercios.map((c) => seccionDe.get(c) ?? null)],
     [b('Producto'), b('Unidad'), ...comercios.map(b), b('Más barato en'), b('Mejor precio $'), b('Diferencia %')],
   ];
   for (const producto of productos) {
@@ -89,7 +97,7 @@ export function hojasPrecios(registros: RegistroPrecio[], generado = new Date())
 
   // 2) Por negocio: cada negocio con sus productos ordenados del más barato al más caro.
   const porNegocio: Celda[][] = [
-    [b('Negocio'), b('Producto'), b('Unidad'), b('Último $'), b('Último Bs.'), b('Fecha último'), b('Mínimo $'), b('Máximo $'), b('Promedio $'), b('Compras')],
+    [b('Sección'), b('Negocio'), b('Producto'), b('Unidad'), b('Último $'), b('Último Bs.'), b('Fecha último'), b('Mínimo $'), b('Máximo $'), b('Promedio $'), b('Compras')],
   ];
   for (const comercio of comercios) {
     const filas = resumen
@@ -97,6 +105,7 @@ export function hojasPrecios(registros: RegistroPrecio[], generado = new Date())
       .sort((x, y) => (x.ultimoUsd ?? Infinity) - (y.ultimoUsd ?? Infinity) || porNombre(x.producto, y.producto));
     for (const r of filas) {
       porNegocio.push([
+        seccionDe.get(comercio) ?? null,
         comercio,
         r.producto,
         r.unidad,
@@ -126,7 +135,7 @@ export function hojasPrecios(registros: RegistroPrecio[], generado = new Date())
 
   return [
     { nombre: 'Comparativa', filas: comparativa, anchos: [28, 10, ...comercios.map(() => 14), 18, 14, 12] },
-    { nombre: 'Por negocio', filas: porNegocio, anchos: [18, 28, 10, 12, 14, 12, 12, 12, 12, 9], fijarEncabezado: true },
+    { nombre: 'Por negocio', filas: porNegocio, anchos: [16, 18, 28, 10, 12, 14, 12, 12, 12, 12, 9], fijarEncabezado: true },
     { nombre: 'Todos los precios', filas: todos, anchos: [28, 18, 10, 12, 14, 12, 10, 12], fijarEncabezado: true },
   ];
 }

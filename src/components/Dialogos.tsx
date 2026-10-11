@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { agruparPorSeccion, iconoSeccion } from '../lib/secciones';
 import { Boton, colores, estilos, Icono, type NombreIcono } from './ui';
 
 export interface Opcion {
@@ -107,7 +108,7 @@ export function ElegirComercio({
   onElegir,
   onCerrar,
 }: {
-  comercios: { id: number; nombre: string }[];
+  comercios: { id: number; nombre: string; tipo: string }[];
   actual: string | null;
   onElegir: (comercioId: number) => void;
   onCerrar: () => void;
@@ -115,9 +116,10 @@ export function ElegirComercio({
   return (
     <MenuOpciones
       titulo={`¿En qué comercio fue?${actual ? ` (ahora: ${actual})` : ''}`}
-      opciones={comercios
+      opciones={agruparPorSeccion(comercios)
+        .flatMap((g) => g.comercios)
         .filter((c) => c.nombre !== actual)
-        .map((c) => ({ titulo: c.nombre, icono: 'storefront-outline' as const, onPress: () => onElegir(c.id) }))}
+        .map((c) => ({ titulo: `${c.nombre} · ${c.tipo}`, icono: iconoSeccion(c.tipo) as NombreIcono, onPress: () => onElegir(c.id) }))}
       onCerrar={onCerrar}
     />
   );

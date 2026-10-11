@@ -19,9 +19,10 @@ import { METODOS_PAGO, type Item, type MetodoPago } from '../db/repo';
 import { convertir, formatBs, formatCantidad, formatFecha, formatNumero, formatUsd, haceCuanto, parseMonto, type Moneda } from '../lib/format';
 import { obtenerFotoFactura } from '../lib/fotos';
 import { conIva, IVA_GENERAL, sinIva, sugerirExento } from '../lib/iva';
+import { agruparPorSeccion, iconoSeccion } from '../lib/secciones';
 import { formatPrecioRef } from '../lib/precios';
 import { useCompraStore } from '../store/useCompraStore';
-import { Boton, Chip, colores, estilos, Icono, Segmentado } from './ui';
+import { Boton, Chip, colores, estilos, Icono, Segmentado, type NombreIcono } from './ui';
 
 export interface AperturaFactura {
   /** null = factura nueva */
@@ -136,6 +137,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const [ivaActivo, setIvaActivo] = useState(inicial.iva);
   const [ivaTocado, setIvaTocado] = useState(false);
   const [nuevoComercio, setNuevoComercio] = useState<string | null>(null);
+  /** Filtro de sección para la lista de comercios (null = todas). */
+  const [seccion, setSeccion] = useState<string | null>(null);
   const [mostrarPendientes, setMostrarPendientes] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
@@ -172,6 +175,12 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
     { usd: 0, bs: 0, ivaUsd: 0, ivaBs: 0 },
   );
   const exentas = lineas.filter((l) => l.exento).length;
+
+  const seccionesUsadas = agruparPorSeccion(comercios).map((g) => g.seccion);
+  // Comercios ordenados por sección; el elegido siempre visible aunque sea de otra sección.
+  const comerciosVisibles = agruparPorSeccion(comercios)
+    .flatMap((g) => g.comercios)
+    .filter((c) => seccion == null || c.tipo === seccion || c.id === comercioId);
 
   const elegirComercio = (id: number) => {
     setComercioId(id);
@@ -235,7 +244,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const agregarComercio = async () => {
     const nombre = nuevoComercio?.trim();
     if (!nombre) return setNuevoComercio(null);
-    const id = await repo.crearComercio(nombre, 'Supermercado');
+    // Se crea en la sección que estés filtrando (se puede cambiar luego en Más → Comercios).
+    const id = await repo.crearComercio(nombre, seccion ?? 'Supermercado');
     await st.recargarComercios();
     setComercioId(id);
     setNuevoComercio(null);
@@ -486,8 +496,21 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
             {/* Comercio */}
             <View style={{ gap: 6 }}>
               <Text style={estilos.etiqueta}>Comercio</Text>
+              {seccionesUsadas.length > 1 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} keyboardShouldPersistTaps="handled">
+                  <Pressable onPress={() => setSeccion(null)} style={[s.filtro, seccion == null && s.filtroActivo]}>
+                    <Text style={[s.filtroTexto, seccion == null && s.filtroTextoActivo]}>Todas</Text>
+                  </Pressable>
+                  {seccionesUsadas.map((sec) => (
+                    <Pressable key={sec} onPress={() => setSeccion(sec)} style={[s.filtro, seccion === sec && s.filtroActivo]}>
+                      <Icono name={iconoSeccion(sec) as NombreIcono} size={14} color={seccion === sec ? '#fff' : colores.textoSuave} />
+                      <Text style={[s.filtroTexto, seccion === sec && s.filtroTextoActivo]}>{sec}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
-                {comercios.map((c) => (
+                {comerciosVisibles.map((c) => (
                   <Chip key={c.id} texto={c.nombre} activo={c.id === comercioId} onPress={() => elegirComercio(c.id)} />
                 ))}
                 {nuevoComercio === null && <Chip texto="Nuevo" icono="add" activo={false} onPress={() => setNuevoComercio('')} />}
@@ -704,6 +727,20 @@ const s = StyleSheet.create({
   inputPrecio: { flex: 1, fontSize: 20, fontWeight: '700', color: colores.texto, paddingVertical: 8 },
   calculo: { fontSize: 14, color: colores.texto, fontWeight: '600' },
   nota: { fontSize: 14, color: colores.textoSuave },
+  filtro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: colores.superficie,
+    borderWidth: 1,
+    borderColor: colores.borde,
+  },
+  filtroActivo: { backgroundColor: colores.acento, borderColor: colores.acento },
+  filtroTexto: { fontSize: 13, fontWeight: '600', color: colores.textoSuave },
+  filtroTextoActivo: { color: '#fff' },
   filaIva: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 40 },
   filaIvaNombre: { flex: 1, fontSize: 15, color: colores.texto },
   chipIva: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, minWidth: 82, alignItems: 'center' },

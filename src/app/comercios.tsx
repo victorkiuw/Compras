@@ -1,22 +1,27 @@
 import { useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Boton, Chip, colores, estilos, Icono } from '../components/ui';
+import { Alert, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { PedirTexto } from '../components/Dialogos';
+import { Boton, Chip, colores, estilos, Icono, type NombreIcono } from '../components/ui';
 import * as repo from '../db/repo';
-import type { Comercio, TipoComercio } from '../db/repo';
+import type { Comercio } from '../db/repo';
+import { agruparPorSeccion, iconoSeccion, seccionesDisponibles } from '../lib/secciones';
 import { useCompraStore } from '../store/useCompraStore';
-
-const TIPOS: TipoComercio[] = ['Mayorista', 'Supermercado', 'Otro'];
 
 export default function Comercios() {
   const { comercios, recargarComercios } = useCompraStore();
   const [editando, setEditando] = useState<Comercio | null>(null);
   const [nombre, setNombre] = useState('');
-  const [tipo, setTipo] = useState<TipoComercio>('Mayorista');
+  const [tipo, setTipo] = useState('Supermercado');
+  const [nuevaSeccion, setNuevaSeccion] = useState(false);
+  const [plegadas, setPlegadas] = useState<Set<string>>(new Set());
+
+  const secciones = seccionesDisponibles([...comercios.map((c) => c.tipo), tipo]);
+  const grupos = agruparPorSeccion(comercios);
 
   const limpiar = () => {
     setEditando(null);
     setNombre('');
-    setTipo('Mayorista');
+    setTipo('Supermercado');
   };
 
   const guardar = async () => {
@@ -32,6 +37,14 @@ export default function Comercios() {
     setNombre(c.nombre);
     setTipo(c.tipo);
   };
+
+  const alternarSeccion = (seccion: string) =>
+    setPlegadas((prev) => {
+      const sig = new Set(prev);
+      if (sig.has(seccion)) sig.delete(seccion);
+      else sig.add(seccion);
+      return sig;
+    });
 
   const eliminar = async (c: Comercio) => {
     const precios = await repo.contarPreciosComercio(c.id);
@@ -59,43 +72,88 @@ export default function Comercios() {
   };
 
   return (
-    <FlatList
-      data={comercios}
-      keyExtractor={(c) => String(c.id)}
-      contentContainerStyle={{ padding: 12, gap: 8, paddingBottom: 32 }}
-      keyboardShouldPersistTaps="handled"
-      ListHeaderComponent={
-        <View style={[estilos.tarjeta, { gap: 10, marginBottom: 8 }]}>
-          <Text style={estilos.etiqueta}>{editando ? 'Editar comercio' : 'Nuevo comercio'}</Text>
-          <TextInput style={estilos.input} placeholder="Nombre (ej. Makro)" placeholderTextColor={colores.textoSuave} value={nombre} onChangeText={setNombre} />
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            {TIPOS.map((t) => (
-              <Chip key={t} texto={t} activo={tipo === t} onPress={() => setTipo(t)} />
-            ))}
+    <>
+      <SectionList
+        sections={grupos.map((g) => ({ titulo: g.seccion, total: g.comercios.length, data: plegadas.has(g.seccion) ? [] : g.comercios }))}
+        keyExtractor={(c) => String(c.id)}
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={{ padding: 12, paddingBottom: 32, gap: 8 }}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          <View style={[estilos.tarjeta, { gap: 10, marginBottom: 4 }]}>
+            <Text style={estilos.etiqueta}>{editando ? 'Editar comercio' : 'Nuevo comercio'}</Text>
+            <TextInput
+              style={estilos.input}
+              placeholder="Nombre (ej. Makro)"
+              placeholderTextColor={colores.textoSuave}
+              value={nombre}
+              onChangeText={setNombre}
+            />
+            <Text style={estilos.etiqueta}>Sección</Text>
+            <View style={s.chips}>
+              {secciones.map((t) => (
+                <Chip key={t} texto={t} icono={iconoSeccion(t) as NombreIcono} activo={tipo === t} onPress={() => setTipo(t)} />
+              ))}
+              <Chip texto="Otra…" icono="add" activo={false} onPress={() => setNuevaSeccion(true)} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {editando && <Boton titulo="Cancelar" variante="secundario" onPress={limpiar} />}
+              <Boton
+                titulo={editando ? 'Guardar cambios' : 'Agregar'}
+                icono="checkmark"
+                onPress={guardar}
+                deshabilitado={!nombre.trim()}
+                style={{ flex: 1 }}
+              />
+            </View>
           </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {editando && <Boton titulo="Cancelar" variante="secundario" onPress={limpiar} />}
-            <Boton titulo={editando ? 'Guardar cambios' : 'Agregar'} icono="checkmark" onPress={guardar} deshabilitado={!nombre.trim()} style={{ flex: 1 }} />
-          </View>
-        </View>
-      }
-      renderItem={({ item }) => (
-        <Pressable onPress={() => editar(item)} style={[estilos.tarjeta, s.fila]}>
-          <Icono name={item.tipo === 'Mayorista' ? 'business-outline' : 'storefront-outline'} color={colores.textoSuave} />
-          <View style={{ flex: 1 }}>
-            <Text style={s.nombre}>{item.nombre}</Text>
-            <Text style={s.tipo}>{item.tipo}</Text>
-          </View>
-          <Pressable onPress={() => eliminar(item)} hitSlop={12} accessibilityLabel={`Eliminar ${item.nombre}`}>
-            <Icono name="trash-outline" color={colores.peligro} size={20} />
+        }
+        renderSectionHeader={({ section }) => (
+          <Pressable onPress={() => alternarSeccion(section.titulo)} style={s.seccion} accessibilityLabel={`Sección ${section.titulo}`}>
+            <Icono name={iconoSeccion(section.titulo) as NombreIcono} size={18} color={colores.primario} />
+            <Text style={s.seccionTexto}>
+              {section.titulo} · {section.total}
+            </Text>
+            <Icono name={plegadas.has(section.titulo) ? 'chevron-down' : 'chevron-up'} size={18} color={colores.textoSuave} />
           </Pressable>
-        </Pressable>
+        )}
+        renderItem={({ item }) => (
+          <Pressable onPress={() => editar(item)} style={[estilos.tarjeta, s.fila, editando?.id === item.id && { borderColor: colores.primario }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.nombre}>{item.nombre}</Text>
+              <Text style={s.tipo}>Toca para editar o cambiar de sección</Text>
+            </View>
+            <Pressable onPress={() => eliminar(item)} hitSlop={12} accessibilityLabel={`Eliminar ${item.nombre}`}>
+              <Icono name="trash-outline" color={colores.peligro} size={20} />
+            </Pressable>
+          </Pressable>
+        )}
+      />
+      {nuevaSeccion && (
+        <PedirTexto
+          titulo="Nueva sección"
+          mensaje="Por ejemplo: Empaques, Agropecuaria, Distribuidora de bebidas…"
+          placeholder="Nombre de la sección"
+          confirmar="Usar"
+          onAceptar={(t) => setTipo(t.charAt(0).toUpperCase() + t.slice(1))}
+          onCerrar={() => setNuevaSeccion(false)}
+        />
       )}
-    />
+    </>
   );
 }
 
 const s = StyleSheet.create({
+  chips: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  seccion: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, marginBottom: 2, paddingVertical: 4 },
+  seccionTexto: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '800',
+    color: colores.textoSuave,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60 },
   nombre: { fontSize: 17, fontWeight: '600', color: colores.texto },
   tipo: { fontSize: 13, color: colores.textoSuave },

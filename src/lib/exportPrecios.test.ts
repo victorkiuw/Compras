@@ -9,6 +9,7 @@ const r = (producto: string, comercio: string, usd: number | null, bs: number, f
   producto,
   unidad: 'Bulto',
   comercio,
+  seccion: comercio === 'Makro' ? 'Mayorista' : 'Supermercado',
   precio_unitario_usd: usd,
   precio_unitario_bs: bs,
   tasa_bs: 40,
@@ -35,9 +36,10 @@ test('resume último, mínimo, máximo y promedio por negocio', () => {
 test('comparativa con un negocio por columna y el más barato', () => {
   const [comp, porNegocio, todos] = hojasPrecios(registros, new Date(2026, 9, 7));
   const plano = (c: unknown) => (c && typeof c === 'object' && 'v' in c ? (c as { v: unknown }).v : c);
-  assert.deepEqual(comp.filas[3].map(plano), ['Producto', 'Unidad', 'Hyperlider', 'Makro', 'Más barato en', 'Mejor precio $', 'Diferencia %']);
-  assert.deepEqual(comp.filas[4].map(plano), ['Aceite', 'Bulto', 20, null, 'Hyperlider', 20, null]);
-  assert.deepEqual(comp.filas[5].map(plano), ['Harina', 'Bulto', 17, 16, 'Makro', 16, 6]);
+  assert.deepEqual(comp.filas[3].map(plano), [null, null, 'Supermercado', 'Mayorista']);
+  assert.deepEqual(comp.filas[4].map(plano), ['Producto', 'Unidad', 'Hyperlider', 'Makro', 'Más barato en', 'Mejor precio $', 'Diferencia %']);
+  assert.deepEqual(comp.filas[5].map(plano), ['Aceite', 'Bulto', 20, null, 'Hyperlider', 20, null]);
+  assert.deepEqual(comp.filas[6].map(plano), ['Harina', 'Bulto', 17, 16, 'Makro', 16, 6]);
   assert.equal(porNegocio.filas.length, 1 + 3);
   assert.deepEqual(todos.filas.slice(1).map((f) => [plano(f[0]), plano(f[1]), plano(f[3])]), [
     ['Aceite', 'Hyperlider', 20],

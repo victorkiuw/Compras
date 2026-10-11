@@ -3,7 +3,8 @@ import type { CompraRegistrada } from '../lib/ahorro';
 import { normalizarNombre, type ItemParseado } from '../lib/parser';
 import { getDb } from './database';
 
-export type TipoComercio = 'Mayorista' | 'Supermercado' | 'Otro';
+/** Sección del comercio (Supermercado, Carnicería, Farmacia… o una propia). */
+export type TipoComercio = string;
 export type MetodoPago = 'Tarjeta' | 'Pago Móvil' | 'Efectivo' | 'Crédito';
 export const METODOS_PAGO: MetodoPago[] = ['Tarjeta', 'Pago Móvil', 'Efectivo', 'Crédito'];
 
@@ -145,13 +146,13 @@ export async function listarComercios(): Promise<Comercio[]> {
 
 export async function crearComercio(nombre: string, tipo: TipoComercio): Promise<number> {
   const db = await getDb();
-  const r = await db.runAsync('INSERT INTO comercio (nombre, tipo) VALUES (?, ?)', nombre.trim(), tipo);
+  const r = await db.runAsync('INSERT INTO comercio (nombre, tipo) VALUES (?, ?)', nombre.trim(), tipo.trim() || 'Otro');
   return r.lastInsertRowId;
 }
 
 export async function actualizarComercio(id: number, nombre: string, tipo: TipoComercio) {
   const db = await getDb();
-  await db.runAsync('UPDATE comercio SET nombre = ?, tipo = ? WHERE id = ?', nombre.trim(), tipo, id);
+  await db.runAsync('UPDATE comercio SET nombre = ?, tipo = ? WHERE id = ?', nombre.trim(), tipo.trim() || 'Otro', id);
 }
 
 export async function contarPreciosComercio(id: number): Promise<number> {
@@ -856,7 +857,7 @@ export async function datosReporte(desde: string, hasta: string): Promise<DatosR
 export async function todosLosPrecios(): Promise<RegistroPrecio[]> {
   const db = await getDb();
   return db.getAllAsync<RegistroPrecio>(
-    `SELECT p.nombre AS producto, COALESCE(r.unidad, p.unidad) AS unidad, c.nombre AS comercio,
+    `SELECT p.nombre AS producto, COALESCE(r.unidad, p.unidad) AS unidad, c.nombre AS comercio, c.tipo AS seccion,
        r.precio_unitario_usd, r.precio_unitario_bs, r.tasa_bs, r.cantidad, r.fecha
      FROM registro_precio_historico r
      JOIN producto p ON p.id = r.producto_id

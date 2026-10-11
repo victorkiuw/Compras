@@ -181,6 +181,19 @@ const MIGRACIONES: Migracion[] = [
   ALTER TABLE item_compra ADD COLUMN iva_pct REAL;
   ALTER TABLE factura ADD COLUMN iva INTEGER NOT NULL DEFAULT 0;
   `,
+
+  // v5: secciones de comercio libres (Carnicería, Panadería, Farmacia…). Se reconstruye la
+  // tabla para quitar el CHECK que solo permitía Mayorista/Supermercado/Otro.
+  `
+  CREATE TABLE comercio_v5 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    tipo TEXT NOT NULL DEFAULT 'Supermercado'
+  );
+  INSERT INTO comercio_v5 (id, nombre, tipo) SELECT id, nombre, tipo FROM comercio;
+  DROP TABLE comercio;
+  ALTER TABLE comercio_v5 RENAME TO comercio;
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
