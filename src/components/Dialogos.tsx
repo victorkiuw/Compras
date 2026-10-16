@@ -105,17 +105,19 @@ const s = StyleSheet.create({
 export function ElegirComercio({
   comercios,
   actual,
+  titulo = '¿En qué comercio fue?',
   onElegir,
   onCerrar,
 }: {
   comercios: { id: number; nombre: string; tipo: string }[];
   actual: string | null;
+  titulo?: string;
   onElegir: (comercioId: number) => void;
   onCerrar: () => void;
 }) {
   return (
     <MenuOpciones
-      titulo={`¿En qué comercio fue?${actual ? ` (ahora: ${actual})` : ''}`}
+      titulo={`${titulo}${actual ? ` (ahora: ${actual})` : ''}`}
       opciones={agruparPorSeccion(comercios)
         .flatMap((g) => g.comercios)
         .filter((c) => c.nombre !== actual)

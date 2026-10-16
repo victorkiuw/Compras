@@ -26,18 +26,28 @@ export default function DetalleProducto() {
   const corregirComercio = async (r: RegistroHistorico, comercioId: number) => {
     const nuevo = comercios.find((c) => c.id === comercioId)?.nombre ?? '';
     const { productos } = await repo.facturaDeRegistro(r.id);
-    const aplicar = async () => {
-      await repo.cambiarComercioRegistro(r.id, comercioId);
+    const recargar = async () => {
       setRegistros(await repo.historialProducto(Number(id)));
       await recargarCompra();
     };
-    if (productos <= 1) return aplicar();
+    const todaLaFactura = async () => {
+      await repo.cambiarComercioRegistro(r.id, comercioId);
+      await recargar();
+    };
+    const soloEste = async () => {
+      const itemId = await repo.itemDeRegistro(r.id);
+      if (itemId == null) return todaLaFactura();
+      await repo.moverItemAComercio(itemId, comercioId);
+      await recargar();
+    };
+    if (productos <= 1) return todaLaFactura();
     Alert.alert(
       'Cambiar comercio',
-      `Esta compra fue parte de una factura con ${productos} productos. Se cambiará a «${nuevo}» la factura completa.`,
+      `Esta compra fue parte de una factura con ${productos} productos. ¿Qué pasas a «${nuevo}»?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Cambiar', onPress: aplicar },
+        { text: 'Toda la factura', onPress: todaLaFactura },
+        { text: `Solo ${producto?.nombre ?? 'este producto'}`, onPress: soloEste },
       ],
     );
   };

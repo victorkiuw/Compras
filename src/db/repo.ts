@@ -909,3 +909,76 @@ export async function ivaPorComercio(): Promise<Record<number, boolean>> {
   const filas = await db.getAllAsync<{ clave: string; valor: string }>("SELECT clave, valor FROM ajuste WHERE clave LIKE 'iva_comercio_%'");
   return Object.fromEntries(filas.map((f) => [Number(f.clave.slice('iva_comercio_'.length)), f.valor === '1']));
 }
+
+/**
+ * Mueve UN producto comprado a otro comercio dentro de la misma compra. Si en esa compra ya hay
+ * una factura de ese comercio con el mismo método de pago, se suma a ella; si no, se crea una
+ * factura nueva con los mismos datos (método, tasa, IVA, fecha). La factura original se
+ * recalcula y se borra si queda vacía.
+ */
+export async function moverItemAComercio(itemId: number, comercioId: number) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    const origen = await db.getFirstAsync<{
+      factura_id: number;
+      lista_id: number;
+      metodo_pago: string | null;
+      tasa_bs: number | null;
+      vence: string | null;
+      iva: number;
+      fecha: string;
+    }>(
+      `SELECT f.id AS factura_id, f.lista_id, f.metodo_pago, f.tasa_bs, f.vence, f.iva, f.fecha
+       FROM item_compra i JOIN factura f ON f.id = i.factura_id WHERE i.id = ?`,
+      itemId,
+    );
+    if (!origen) {
+      // Precio sin factura (datos antiguos): solo se corrige el comercio.
+      await db.runAsync('UPDATE item_compra SET comercio_id = ? WHERE id = ?', comercioId, itemId);
+      await db.runAsync('UPDATE registro_precio_historico SET comercio_id = ? WHERE item_id = ?', comercioId, itemId);
+      return;
+    }
+    const existente = await db.getFirstAsync<{ id: number }>(
+      `SELECT id FROM factura
+       WHERE lista_id = ? AND comercio_id = ? AND COALESCE(metodo_pago, '') = COALESCE(?, '') AND id <> ?
+       ORDER BY id LIMIT 1`,
+      origen.lista_id,
+      comercioId,
+      origen.metodo_pago,
+      origen.factura_id,
+    );
+    let destino = existente?.id;
+    if (destino == null) {
+      const r = await db.runAsync(
+        'INSERT INTO factura (lista_id, comercio_id, metodo_pago, tasa_bs, vence, iva, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        origen.lista_id,
+        comercioId,
+        origen.metodo_pago,
+        origen.tasa_bs,
+        origen.vence,
+        origen.iva,
+        origen.fecha,
+      );
+      destino = r.lastInsertRowId;
+    }
+    await db.runAsync(
+      'UPDATE item_compra SET factura_id = ?, comercio_id = ?, foto_factura_uri = NULL WHERE id = ?',
+      destino,
+      comercioId,
+      itemId,
+    );
+    await db.runAsync('UPDATE registro_precio_historico SET comercio_id = ? WHERE item_id = ?', comercioId, itemId);
+    await db.runAsync(RECALCULAR_FACTURA, destino);
+    await actualizarEstadoCredito(destino);
+    await limpiarFactura(origen.factura_id);
+    const sigue = await db.getFirstAsync<{ id: number }>('SELECT id FROM factura WHERE id = ?', origen.factura_id);
+    if (sigue) await actualizarEstadoCredito(origen.factura_id);
+  });
+}
+
+/** Ítem al que pertenece un precio registrado (para mover solo ese producto). */
+export async function itemDeRegistro(registroId: number): Promise<number | null> {
+  const db = await getDb();
+  const fila = await db.getFirstAsync<{ item_id: number | null }>('SELECT item_id FROM registro_precio_historico WHERE id = ?', registroId);
+  return fila?.item_id ?? null;
+}

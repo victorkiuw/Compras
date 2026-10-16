@@ -25,6 +25,8 @@ export default function DetalleCompra() {
   const [items, setItems] = useState<Item[]>([]);
   const [facturas, setFacturas] = useState<Factura[]>([]);
   const [corrigiendo, setCorrigiendo] = useState<Factura | null>(null);
+  /** Producto que se va a mover solo a otro comercio. */
+  const [moviendo, setMoviendo] = useState<Item | null>(null);
   const comercios = useCompraStore((st) => st.comercios);
   const [fotoAbierta, setFotoAbierta] = useState<string | null>(null);
 
@@ -35,11 +37,21 @@ export default function DetalleCompra() {
     repo.getFacturas(listaId).then(setFacturas);
   }, [id]);
 
-  const corregirComercio = async (f: Factura, comercioId: number) => {
-    await repo.cambiarComercioFactura(f.id, comercioId);
+  const recargarDetalle = async () => {
     const listaId = Number(id);
     setFacturas(await repo.getFacturas(listaId));
     setItems(await repo.getItems(listaId));
+    setLista(await repo.getLista(listaId));
+  };
+
+  const corregirComercio = async (f: Factura, comercioId: number) => {
+    await repo.cambiarComercioFactura(f.id, comercioId);
+    await recargarDetalle();
+  };
+
+  const moverProducto = async (i: Item, comercioId: number) => {
+    await repo.moverItemAComercio(i.id, comercioId);
+    await recargarDetalle();
   };
 
   // IVA incluido en una factura: total pagado menos la base de cada producto.
@@ -88,6 +100,12 @@ export default function DetalleCompra() {
           <Desglose titulo="Por comercio" filas={porComercio} />
         </View>
 
+        {facturas.length > 0 && (
+          <Text style={s.ayuda}>
+            ¿Te equivocaste de local? Toca el nombre del comercio (✏️) para cambiar toda la factura, o toca un producto para pasarlo solo a
+            otro comercio.
+          </Text>
+        )}
         {facturas.map((f) => (
           <View key={f.id} style={[estilos.tarjeta, { gap: 6 }]}>
             <View style={s.filaEntre}>
@@ -114,7 +132,12 @@ export default function DetalleCompra() {
             {items
               .filter((i) => i.factura_id === f.id)
               .map((i) => (
-                <View key={i.id} style={s.item}>
+                <Pressable
+                  key={i.id}
+                  onPress={() => setMoviendo(i)}
+                  style={({ pressed }) => [s.item, pressed && { opacity: 0.6 }]}
+                  accessibilityLabel={`Mover ${i.producto_nombre} a otro comercio`}
+                >
                   <Text style={s.nombre} numberOfLines={1}>
                     {i.producto_nombre}
                   </Text>
@@ -123,7 +146,7 @@ export default function DetalleCompra() {
                     {i.unidad ? ` ${i.unidad}` : ''}
                   </Text>
                   <Text style={s.itemPrecio}>{i.precio_pagado_usd != null ? formatUsd(i.precio_pagado_usd) : formatBs(i.precio_pagado_bs)}</Text>
-                </View>
+                </Pressable>
               ))}
           </View>
         ))}
@@ -142,6 +165,16 @@ export default function DetalleCompra() {
 
         <Boton titulo="Eliminar esta compra" variante="texto" icono="trash-outline" onPress={eliminar} />
       </ScrollView>
+
+      {moviendo && (
+        <ElegirComercio
+          comercios={comercios}
+          actual={moviendo.comercio_nombre}
+          titulo={`¿Dónde compraste ${moviendo.producto_nombre}?`}
+          onElegir={(comercioId) => moverProducto(moviendo, comercioId)}
+          onCerrar={() => setMoviendo(null)}
+        />
+      )}
 
       {corrigiendo && (
         <ElegirComercio
@@ -200,5 +233,6 @@ const s = StyleSheet.create({
   meta: { fontSize: 13, color: colores.textoSuave },
   precio: { fontSize: 16, fontWeight: '700', color: colores.primario },
   itemPrecio: { fontSize: 15, fontWeight: '600', color: colores.texto, minWidth: 64, textAlign: 'right' },
+  ayuda: { fontSize: 13, color: colores.textoSuave, lineHeight: 18 },
   visor: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center', padding: 12 },
 });
