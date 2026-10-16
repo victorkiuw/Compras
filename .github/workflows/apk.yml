@@ -52,7 +52,16 @@ jobs:
 
       - name: Compilar APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee ../gradle.log; then
+            # Deja el motivo del fallo como anotación (visible en la API sin descargar el log completo).
+            grep -nE "What went wrong|error:|Error:|FAILED|Exception" -A6 ../gradle.log | head -60 | while IFS= read -r linea; do
+              echo "::error title=Gradle::${linea//%/%25}"
+            done
+            exit 1
+          fi
 
       - name: Renombrar APK
         run: |
