@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { convertir, formatBs, formatCantidad, formatUsd, haceCuanto, parseMonto } from './format.ts';
+import { conMismaHora, convertir, formatBs, formatCantidad, formatUsd, haceCuanto, parseMonto } from './format.ts';
 
 test('formatBs usa formato venezolano', () => {
   assert.equal(formatBs(1234.5), 'Bs. 1.234,50');
@@ -40,4 +40,10 @@ test('formatUsd y convertir con la tasa', () => {
   assert.deepEqual(convertir(5, 'USD', 36.5), { usd: 5, bs: 182.5 });
   assert.deepEqual(convertir(182.5, 'BS', 36.5), { usd: 5, bs: 182.5 });
   assert.deepEqual(convertir(5, 'USD', null), { usd: 5, bs: null });
+});
+
+test('conMismaHora cambia el día y conserva la hora', () => {
+  const original = new Date(2026, 9, 11, 17, 23).toISOString();
+  const r = new Date(conMismaHora(original, new Date(2026, 9, 9, 3, 0)));
+  assert.deepEqual([r.getFullYear(), r.getMonth(), r.getDate(), r.getHours(), r.getMinutes()], [2026, 9, 9, 17, 23]);
 });

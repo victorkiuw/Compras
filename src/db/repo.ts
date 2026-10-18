@@ -982,3 +982,28 @@ export async function itemDeRegistro(registroId: number): Promise<number | null>
   const fila = await db.getFirstAsync<{ item_id: number | null }>('SELECT item_id FROM registro_precio_historico WHERE id = ?', registroId);
   return fila?.item_id ?? null;
 }
+
+// ───────────── Fechas ─────────────
+
+/** Cambia la fecha de una factura y de sus productos y precios (para reportes y comparaciones). */
+export async function cambiarFechaFactura(facturaId: number, fecha: string) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE factura SET fecha = ? WHERE id = ?', fecha, facturaId);
+    await db.runAsync('UPDATE item_compra SET comprado_en = ? WHERE factura_id = ?', fecha, facturaId);
+    await db.runAsync(
+      'UPDATE registro_precio_historico SET fecha = ? WHERE item_id IN (SELECT id FROM item_compra WHERE factura_id = ?)',
+      fecha,
+      facturaId,
+    );
+  });
+}
+
+/** Cambia la fecha de una compra (viaje). Con `conFacturas`, sus facturas pasan al mismo día conservando su hora. */
+export async function cambiarFechaLista(listaId: number, fecha: string, conFacturas: boolean, mismaHora: (original: string) => string) {
+  const db = await getDb();
+  await db.runAsync('UPDATE lista_compra SET fecha = ? WHERE id = ?', fecha, listaId);
+  if (!conFacturas) return;
+  const facturas = await db.getAllAsync<{ id: number; fecha: string }>('SELECT id, fecha FROM factura WHERE lista_id = ?', listaId);
+  for (const f of facturas) await cambiarFechaFactura(f.id, mismaHora(f.fecha));
+}

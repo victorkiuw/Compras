@@ -6,7 +6,8 @@ import { Boton, colores, estilos, Icono } from '../../components/ui';
 import { useCompraStore } from '../../store/useCompraStore';
 import * as repo from '../../db/repo';
 import type { Factura, Item, Lista } from '../../db/repo';
-import { formatBs, formatCantidad, formatFechaHora, formatTasa, formatUsd } from '../../lib/format';
+import { elegirFecha } from '../../lib/elegirFecha';
+import { conMismaHora, formatBs, formatCantidad, formatFecha, formatFechaHora, formatTasa, formatUsd } from '../../lib/format';
 import { sinIva } from '../../lib/iva';
 
 function agrupar(facturas: Factura[], clave: (f: Factura) => string | null) {
@@ -42,6 +43,29 @@ export default function DetalleCompra() {
     setFacturas(await repo.getFacturas(listaId));
     setItems(await repo.getItems(listaId));
     setLista(await repo.getLista(listaId));
+  };
+
+  const cambiarFechaDeFactura = async (f: Factura) => {
+    const fecha = await elegirFecha(f.fecha);
+    if (!fecha) return;
+    await repo.cambiarFechaFactura(f.id, fecha);
+    await recargarDetalle();
+  };
+
+  const cambiarFechaCompra = async () => {
+    if (!lista) return;
+    const fecha = await elegirFecha(lista.fecha);
+    if (!fecha) return;
+    const aplicar = async (conFacturas: boolean) => {
+      await repo.cambiarFechaLista(lista.id, fecha, conFacturas, (original) => conMismaHora(original, new Date(fecha)));
+      await recargarDetalle();
+    };
+    if (!facturas.length) return aplicar(false);
+    Alert.alert('Cambiar fecha', `¿Pasar también ${facturas.length === 1 ? 'la factura' : `las ${facturas.length} facturas`} al ${formatFecha(fecha)}?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Solo la compra', onPress: () => aplicar(false) },
+      { text: 'Compra y facturas', onPress: () => aplicar(true) },
+    ]);
   };
 
   const corregirComercio = async (f: Factura, comercioId: number) => {
@@ -93,6 +117,10 @@ export default function DetalleCompra() {
           <Text style={s.totalEtiqueta}>
             {comprados.length} de {items.length} productos · {facturas.length} {facturas.length === 1 ? 'factura' : 'facturas'}
           </Text>
+          <Pressable onPress={cambiarFechaCompra} style={s.fechaCompra} accessibilityLabel="Cambiar la fecha de esta compra">
+            <Icono name="calendar-outline" size={18} color="#fff" />
+            <Text style={s.fechaCompraTexto}>{formatFecha(lista.fecha)} · Cambiar fecha</Text>
+          </Pressable>
         </View>
 
         <View style={s.dosColumnas}>
@@ -129,6 +157,10 @@ export default function DetalleCompra() {
                 </Pressable>
               )}
             </View>
+            <Pressable onPress={() => cambiarFechaDeFactura(f)} style={s.fechaFactura} accessibilityLabel="Cambiar la fecha de esta factura">
+              <Icono name="calendar-outline" size={15} color={colores.acento} />
+              <Text style={s.fechaFacturaTexto}>Factura del {formatFecha(f.fecha)}</Text>
+            </Pressable>
             {items
               .filter((i) => i.factura_id === f.id)
               .map((i) => (
@@ -233,6 +265,29 @@ const s = StyleSheet.create({
   meta: { fontSize: 13, color: colores.textoSuave },
   precio: { fontSize: 16, fontWeight: '700', color: colores.primario },
   itemPrecio: { fontSize: 15, fontWeight: '600', color: colores.texto, minWidth: 64, textAlign: 'right' },
+  fechaCompra: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  fechaCompraTexto: { color: '#fff', fontSize: 14, fontWeight: '700', textTransform: 'capitalize' },
+  fechaFactura: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: colores.acentoSuave,
+  },
+  fechaFacturaTexto: { fontSize: 13, fontWeight: '600', color: colores.acento },
   ayuda: { fontSize: 13, color: colores.textoSuave, lineHeight: 18 },
   visor: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center', padding: 12 },
 });

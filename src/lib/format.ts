@@ -88,3 +88,9 @@ export function haceCuanto(iso: string, ahora = new Date()): string {
 export function diasDesde(iso: string, ahora = new Date()): number {
   return Math.floor((ahora.getTime() - new Date(iso).getTime()) / 86_400_000);
 }
+
+/** Misma hora (local) de `original`, pero en el día de `dia`. Para cambiar solo la fecha de una compra. */
+export function conMismaHora(original: string, dia: Date): string {
+  const o = new Date(original);
+  return new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), o.getHours(), o.getMinutes(), o.getSeconds()).toISOString();
+}
