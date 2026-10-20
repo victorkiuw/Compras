@@ -19,6 +19,7 @@ import { METODOS_PAGO, type Item, type MetodoPago } from '../db/repo';
 import { convertir, formatBs, formatCantidad, formatFecha, formatNumero, formatUsd, haceCuanto, parseMonto, type Moneda } from '../lib/format';
 import { obtenerFotoFactura } from '../lib/fotos';
 import { conIva, IVA_GENERAL, sinIva, sugerirExento } from '../lib/iva';
+import { cantidadDePrecio, nombreUnidadPrecio, pasoDeCantidad, unidadDePrecio } from '../lib/unidades';
 import { formatPrecioRef } from '../lib/precios';
 import { useCompraStore } from '../store/useCompraStore';
 import { SelectorComercio } from './SelectorComercio';
@@ -146,17 +147,25 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const ivaDe = (l: Linea) => (ivaActivo && !l.exento ? IVA_GENERAL : 0);
 
   /** Montos de una línea: base sin IVA y total con IVA (usd/bs/unitarios ya lo incluyen). */
+  /** Unidad del producto de una línea (g, Kg, Caja…). */
+  const unidadDe = (l: Linea) => itemDe(l.itemId)?.unidad ?? null;
+
+  /**
+   * Montos de una línea. El precio «por unidad» de gramos y ml es por kilo y por litro: 500 g a
+   * Bs. 5.000 el kilo son Bs. 2.500. Los unitarios devueltos también son por Kg / L.
+   */
   const calcular = (l: Linea) => {
     const cantidad = parseMonto(l.cantidadTxt) ?? 0;
+    const cantidadPrecio = cantidadDePrecio(cantidad, unidadDe(l));
     const monto = parseMonto(l.precioTxt) ?? 0;
-    const totalMoneda = modoPrecio === 'total' ? monto : monto * cantidad;
+    const totalMoneda = modoPrecio === 'total' ? monto : monto * cantidadPrecio;
     const base = convertir(totalMoneda, moneda, tasa);
     const pct = ivaDe(l);
     const usd = base.usd != null ? conIva(base.usd, pct) : null;
     const bs = base.bs != null ? conIva(base.bs, pct) : null;
-    const unitarioUsd = usd != null && cantidad > 0 ? usd / cantidad : null;
-    const unitarioBs = bs != null && cantidad > 0 ? bs / cantidad : null;
-    return { cantidad, monto, pct, baseUsd: base.usd, baseBs: base.bs, usd, bs, unitarioUsd, unitarioBs };
+    const unitarioUsd = usd != null && cantidadPrecio > 0 ? usd / cantidadPrecio : null;
+    const unitarioBs = bs != null && cantidadPrecio > 0 ? bs / cantidadPrecio : null;
+    return { cantidad, cantidadPrecio, monto, pct, baseUsd: base.usd, baseBs: base.bs, usd, bs, unitarioUsd, unitarioBs };
   };
 
   const totales = lineas.reduce(
@@ -202,7 +211,7 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
     if (m === modoPrecio) return;
     setLineas((ls) =>
       ls.map((l) => {
-        const cantidad = parseMonto(l.cantidadTxt) ?? 0;
+        const cantidad = cantidadDePrecio(parseMonto(l.cantidadTxt) ?? 0, unidadDe(l));
         const v = parseMonto(l.precioTxt);
         if (!v || !cantidad) return l;
         return { ...l, precioTxt: formatNumero(m === 'total' ? v * cantidad : v / cantidad) };
@@ -214,7 +223,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
   const pasoCantidad = (l: Linea, delta: number) => {
     Haptics.selectionAsync().catch(() => {});
     const actual = parseMonto(l.cantidadTxt) ?? 0;
-    actualizar(l.itemId, { cantidadTxt: formatCantidad(Math.max(0, Math.round((actual + delta) * 100) / 100)) });
+    const paso = delta * pasoDeCantidad(unidadDe(l));
+    actualizar(l.itemId, { cantidadTxt: formatCantidad(Math.max(0, Math.round((actual + paso) * 100) / 100)) });
   };
 
   const usarPrecioAnterior = (l: Linea, item: Item) => {
@@ -226,7 +236,8 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
     if (unit == null) return;
     // El precio guardado incluye el IVA que se pagó; el campo se escribe sin IVA.
     unit = sinIva(unit, ivaDe(l));
-    const cantidad = parseMonto(l.cantidadTxt) ?? 1;
+    // El precio guardado de gramos/ml ya es por Kg/L, igual que el campo «por unidad».
+    const cantidad = cantidadDePrecio(parseMonto(l.cantidadTxt) ?? 1, unidadDe(l));
     actualizar(l.itemId, { precioTxt: formatNumero(modoPrecio === 'total' ? unit * cantidad : unit) });
   };
 
@@ -403,12 +414,21 @@ function HojaFactura({ apertura, onCerrar }: { apertura: AperturaFactura; onCerr
                         autoFocus={idx === 0 && !editando}
                         selectTextOnFocus
                       />
+                      {modoPrecio === 'unitario' && unidadDePrecio(item.unidad) && (
+                        <Text style={s.porUnidad}>/{nombreUnidadPrecio(item.unidad)}</Text>
+                      )}
                     </View>
                   </View>
+                  {modoPrecio === 'unitario' && unidadDePrecio(item.unidad) && (
+                    <Text style={s.nota}>
+                      Escribe el precio del {nombreUnidadPrecio(item.unidad) === 'Kg' ? 'kilo' : 'litro'}; se calcula lo que cuestan los{' '}
+                      {formatCantidad(c.cantidad)} {item.unidad}.
+                    </Text>
+                  )}
 
                   {c.monto > 0 && c.cantidad > 0 && (
                     <Text style={s.calculo}>
-                      {modoPrecio === 'unitario' ? 'Total ' : 'Unidad '}
+                      {modoPrecio === 'unitario' ? 'Total ' : `${unidadDePrecio(item.unidad) ? `Precio del ${nombreUnidadPrecio(item.unidad)}` : 'Unidad'} `}
                       {c.pct > 0 ? 'con IVA ' : ''}
                       {modoPrecio === 'unitario'
                         ? [c.usd != null && formatUsd(c.usd), c.bs != null && formatBs(c.bs)].filter(Boolean).join(' · ')
@@ -679,6 +699,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
     backgroundColor: colores.superficie,
   },
+  porUnidad: { fontSize: 15, fontWeight: '700', color: colores.textoSuave },
   simbolo: { fontSize: 17, fontWeight: '700', color: colores.primario },
   inputPrecio: { flex: 1, fontSize: 20, fontWeight: '700', color: colores.texto, paddingVertical: 8 },
   calculo: { fontSize: 14, color: colores.texto, fontWeight: '600' },

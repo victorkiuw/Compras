@@ -194,6 +194,16 @@ const MIGRACIONES: Migracion[] = [
   DROP TABLE comercio;
   ALTER TABLE comercio_v5 RENAME TO comercio;
   `,
+
+  // v6: los precios de compras en gramos y ml pasan a guardarse por Kg y por L.
+  `
+  UPDATE registro_precio_historico
+  SET precio_unitario_bs = precio_unitario_bs * 1000,
+      precio_unitario_usd = precio_unitario_usd * 1000,
+      cantidad = cantidad / 1000.0,
+      unidad = CASE unidad WHEN 'g' THEN 'Kg' ELSE 'L' END
+  WHERE unidad IN ('g', 'ml');
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;

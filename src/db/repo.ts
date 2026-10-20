@@ -1,6 +1,7 @@
 import type { RegistroPrecio } from '../lib/exportPrecios';
 import type { CompraRegistrada } from '../lib/ahorro';
 import { normalizarNombre, type ItemParseado } from '../lib/parser';
+import { cantidadDePrecio, nombreUnidadPrecio } from '../lib/unidades';
 import { getDb } from './database';
 
 /** Sección del comercio (Supermercado, Carnicería, Farmacia… o una propia). */
@@ -365,6 +366,8 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
       // Un registro histórico por ítem: si se edita la compra, se reemplaza.
       await db.runAsync('DELETE FROM registro_precio_historico WHERE item_id = ?', l.itemId);
       if (l.cantidad > 0 && l.totalBs > 0) {
+        // Gramos y ml se guardan por Kg y por L para compararlos con compras por kilo o litro.
+        const cantidadPrecio = cantidadDePrecio(l.cantidad, item.unidad);
         await db.runAsync(
           `INSERT INTO registro_precio_historico
              (producto_id, comercio_id, item_id, precio_unitario_bs, precio_unitario_usd, tasa_bs, cantidad, unidad, fecha)
@@ -372,11 +375,11 @@ export async function guardarFactura(facturaId: number | null, listaId: number, 
           item.producto_id,
           d.comercioId,
           l.itemId,
-          l.totalBs / l.cantidad,
-          l.totalUsd != null ? l.totalUsd / l.cantidad : null,
+          l.totalBs / cantidadPrecio,
+          l.totalUsd != null ? l.totalUsd / cantidadPrecio : null,
           d.tasaBs,
-          l.cantidad,
-          item.unidad,
+          cantidadPrecio,
+          nombreUnidadPrecio(item.unidad),
           item.comprado_en ?? fecha,
         );
       }
@@ -626,8 +629,26 @@ export async function actualizarItem(itemId: number, c: CambiosItem) {
       c.nota?.trim() || null,
       itemId,
     );
-    // Si ya estaba comprado, su precio histórico pasa al producto corregido.
-    await db.runAsync('UPDATE registro_precio_historico SET producto_id = ?, unidad = ? WHERE item_id = ?', producto.id, c.unidad, itemId);
+    // Si ya estaba comprado, su precio histórico pasa al producto corregido (recalculado por si cambió la unidad).
+    const comprado = await db.getFirstAsync<{ cantidad_comprada: number | null; precio_pagado_bs: number | null; precio_pagado_usd: number | null }>(
+      'SELECT cantidad_comprada, precio_pagado_bs, precio_pagado_usd FROM item_compra WHERE id = ? AND comprado = 1',
+      itemId,
+    );
+    const cant = comprado?.cantidad_comprada ? cantidadDePrecio(comprado.cantidad_comprada, c.unidad) : null;
+    if (comprado && cant) {
+      await db.runAsync(
+        `UPDATE registro_precio_historico SET producto_id = ?, unidad = ?, cantidad = ?, precio_unitario_bs = ?, precio_unitario_usd = ?
+         WHERE item_id = ?`,
+        producto.id,
+        nombreUnidadPrecio(c.unidad),
+        cant,
+        (comprado.precio_pagado_bs ?? 0) / cant,
+        comprado.precio_pagado_usd != null ? comprado.precio_pagado_usd / cant : null,
+        itemId,
+      );
+    } else {
+      await db.runAsync('UPDATE registro_precio_historico SET producto_id = ? WHERE item_id = ?', producto.id, itemId);
+    }
   });
 }
 

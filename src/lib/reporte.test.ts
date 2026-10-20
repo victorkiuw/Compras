@@ -30,6 +30,11 @@ test('resumen de la semana separa pagado y crédito', () => {
   assert.equal(harina.cantidad, 3);
   assert.equal(harina.mejorComercio, 'Makro');
   assert.equal(harina.mejorUsd, 15);
+  const queso = resumirSemana({
+    ...entrada,
+    compras: [{ factura_id: 3, fecha: '2026-09-30T14:00:00Z', comercio: 'Toro', metodo_pago: 'Tarjeta', tasa_bs: 40, producto: 'Queso', cantidad: 500, unidad: 'g', total_usd: 4, total_bs: 160 }],
+  }).porProducto[0];
+  assert.equal(queso.mejorUsd, 8); // $4 por 500 g = $8 el kilo
   assert.deepEqual(r.porComercio.map((c) => [c.comercio, c.usd, c.creditoUsd]), [['Makro', 53.2, 0], ['Hyperlider', 0, 16]]);
 });
 

@@ -1,5 +1,6 @@
 // Arma el reporte semanal (hojas de Excel) a partir de los datos de la base. Sin imports de React Native.
 import { sinIva } from './iva.ts';
+import { cantidadDePrecio } from './unidades.ts';
 import type { Celda, Hoja } from './xlsx.ts';
 
 export interface CompraReporte {
@@ -106,7 +107,8 @@ export function resumirSemana(e: EntradaReporte): ResumenSemana {
     p.cantidad += c.cantidad ?? 0;
     p.usd += usd;
     p.bs += bs;
-    const unitario = c.total_usd != null && c.cantidad ? c.total_usd / c.cantidad : null;
+    // Gramos y ml se comparan por Kg y por L.
+    const unitario = c.total_usd != null && c.cantidad ? c.total_usd / cantidadDePrecio(c.cantidad, c.unidad) : null;
     if (unitario != null && (p.mejorUsd == null || unitario < p.mejorUsd)) {
       p.mejorUsd = unitario;
       p.mejorComercio = c.comercio;
@@ -162,7 +164,7 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
       c.producto,
       c.cantidad,
       c.unidad,
-      d(c.total_usd != null && c.cantidad ? c.total_usd / c.cantidad : null),
+      d(c.total_usd != null && c.cantidad ? c.total_usd / cantidadDePrecio(c.cantidad, c.unidad) : null),
       d(c.total_usd),
       d(c.total_bs),
       c.iva_pct == null ? null : c.iva_pct === 0 ? 'Exento' : `${c.iva_pct}%`,
@@ -176,7 +178,7 @@ export function hojasReporte(e: EntradaReporte, titulo: string, generado = new D
 
   const productos: Celda[][] = [
     [b('Producto'), b('Cantidad'), b('Unidad'), b('Gastado $'), b('Gastado Bs.'), b('Precio prom. $'), b('Más barato en'), b('Mejor precio $')],
-    ...r.porProducto.map((p) => [p.producto, p.cantidad, p.unidad, d(p.usd), d(p.bs), d(p.cantidad ? p.usd / p.cantidad : null), p.mejorComercio, d(p.mejorUsd)]),
+    ...r.porProducto.map((p) => [p.producto, p.cantidad, p.unidad, d(p.usd), d(p.bs), d(p.cantidad ? p.usd / cantidadDePrecio(p.cantidad, p.unidad) : null), p.mejorComercio, d(p.mejorUsd)]),
   ];
 
   const creditos: Celda[][] = [
